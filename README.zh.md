@@ -187,7 +187,7 @@ pip install -e .
 # 禁用 chat UI（纯 server 模式）
 ./service.sh start --no-chat
 
-# 添加 API key + KV 量化，用于生产负载
+# 覆盖默认 API key + KV 量化，用于生产负载
 XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
 
 # 启用 tool-call 加速，用于 MCP 密集型工作流

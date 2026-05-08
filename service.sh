@@ -10,7 +10,7 @@
 #   XMLX_VLM_MODEL       Default model to load
 #   XMLX_VLM_PORT        Server port (default: 8080)
 #   XMLX_VLM_CHAT_PORT   Chat UI port (default: 7860)
-#   XMLX_VLM_API_KEY     API key for auth
+#   XMLX_VLM_API_KEY     API key for auth (default: x123456)
 #   XMLX_VLM_ARGS        Extra args passed to server (e.g. --enable-thinking)
 #
 # Direct server options (passed through to server):
@@ -30,7 +30,7 @@ LOG_DIR="${SCRIPT_DIR}/.logs"
 MODEL="${XMLX_VLM_MODEL:-mlx-community/qwen3.6-35B-A3B-4bit}"
 PORT="${XMLX_VLM_PORT:-8080}"
 CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
-API_KEY="${XMLX_VLM_API_KEY:-}"
+API_KEY="${XMLX_VLM_API_KEY:-x123456}"
 EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
 
 # Default speculative decoding config

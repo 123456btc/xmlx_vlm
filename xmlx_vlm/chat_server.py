@@ -287,8 +287,8 @@ Examples:
     parser.add_argument(
         "--api-key",
         type=str,
-        default=None,
-        help="API key for server authentication",
+        default=os.environ.get("XMLX_VLM_API_KEY", "x123456"),
+        help="API key for server authentication (default: x123456 or XMLX_VLM_API_KEY env var)",
     )
     parser.add_argument(
         "--model",

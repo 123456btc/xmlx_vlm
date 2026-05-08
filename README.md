@@ -184,7 +184,7 @@ pip install -e .
 # Disable chat UI (headless server mode)
 ./service.sh start --no-chat
 
-# Add API key + KV quantization for production workloads
+# Override default API key + KV quantization for production workloads
 XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
 
 # Enable tool-call acceleration for MCP-heavy workflows
