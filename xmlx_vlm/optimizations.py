@@ -62,6 +62,10 @@ HARDWARE_PROFILES = {
     "M4 Pro": {"bandwidth": 273, "gpu_cores": 20},
     "M4 Max": {"bandwidth": 546, "gpu_cores": 40},
     "M4 Ultra": {"bandwidth": 800, "gpu_cores": 80},
+    # M5 Series
+    "M5": {"bandwidth": 153, "gpu_cores": 10},
+    "M5 Pro": {"bandwidth": 307, "gpu_cores": 20},
+    "M5 Max": {"bandwidth": 614, "gpu_cores": 40},
 }
 
 
