@@ -33,6 +33,13 @@ CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
 API_KEY="${XMLX_VLM_API_KEY:-}"
 EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
 
+# Default speculative decoding config
+DRAFT_MODEL="${XMLX_VLM_DRAFT_MODEL:-z-lab/Qwen3.6-35B-A3B-DFlash}"
+DRAFT_KIND="${XMLX_VLM_DRAFT_KIND:-dflash}"
+
+# Default to launching chat UI unless explicitly disabled via XMLX_VLM_CHAT=false
+CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
+
 SERVER_PID_FILE="${PID_DIR}/server.pid"
 CHAT_PID_FILE="${PID_DIR}/chat.pid"
 SERVER_LOG="${LOG_DIR}/server.log"
@@ -111,9 +118,15 @@ parse_server_opts() {
 
 cmd_start() {
     local with_chat=false
+    if [[ "${CHAT_ENABLED}" != "false" && "${CHAT_ENABLED}" != "0" ]]; then
+        with_chat=true
+    fi
     for arg in "$@"; do
         if [[ "$arg" == "--chat" ]]; then
             with_chat=true
+        fi
+        if [[ "$arg" == "--no-chat" ]]; then
+            with_chat=false
         fi
     done
 
@@ -128,6 +141,7 @@ cmd_start() {
         echo "  Model: ${MODEL}"
         echo "  Port:  ${PORT}"
         [[ -n "$API_KEY" ]] && echo "  Auth:  enabled"
+        [[ -n "$DRAFT_MODEL" ]] && echo "  Draft: ${DRAFT_MODEL} (${DRAFT_KIND})"
         [[ ${#SERVER_OPTS[@]} -gt 0 ]] && echo "  Extra: ${SERVER_OPTS[*]}"
         [[ -n "$EXTRA_ARGS" ]] && echo "  Env:   ${EXTRA_ARGS}"
 
@@ -137,6 +151,9 @@ cmd_start() {
             --port "$PORT"
         )
         [[ -n "$API_KEY" ]] && server_args+=(--api-key "$API_KEY")
+        # Default speculative decoding (user can override via SERVER_OPTS)
+        [[ -n "$DRAFT_MODEL" ]] && server_args+=(--draft-model "$DRAFT_MODEL")
+        [[ -n "$DRAFT_KIND" ]] && server_args+=(--draft-kind "$DRAFT_KIND")
         [[ ${#SERVER_OPTS[@]} -gt 0 ]] && server_args+=("${SERVER_OPTS[@]}")
         [[ -n "$EXTRA_ARGS" ]] && read -ra extra <<< "$EXTRA_ARGS" && server_args+=("${extra[@]}")
 
@@ -339,15 +356,15 @@ case "$cmd" in
 XMLX VLM Service Manager
 
 Usage:
-  $(basename "$0") start [--chat] [SERVER_OPTS]   Start server (optionally with chat UI)
-  $(basename "$0") stop                           Stop server and chat UI
-  $(basename "$0") restart [--chat] [SERVER_OPTS] Restart server
-  $(basename "$0") status                         Show running status
-  $(basename "$0") logs [server|chat]             Tail logs
+  $(basename "$0") start [--no-chat] [SERVER_OPTS]   Start server with chat UI by default
+  $(basename "$0") stop                               Stop server and chat UI
+  $(basename "$0") restart [--no-chat] [SERVER_OPTS]  Restart server
+  $(basename "$0") status                             Show running status
+  $(basename "$0") logs [server|chat]                 Tail logs
 
-Server Options (passed directly to xmlx_vlm.server):
-  --draft-model MODEL         Speculative drafter (e.g. z-lab/Qwen3.6-35B-A3B-DFlash)
-  --draft-kind {dflash,mtp}   Drafter family
+Server Options (override defaults passed to xmlx_vlm.server):
+  --draft-model MODEL         Speculative drafter (default: ${DRAFT_MODEL})
+  --draft-kind {dflash,mtp}   Drafter family (default: ${DRAFT_KIND})
   --kv-bits BITS              KV cache quantization bits (e.g. 3.5, 8)
   --kv-quant-scheme SCHEME    {uniform, turboquant}
 
@@ -357,11 +374,22 @@ Environment:
   XMLX_VLM_CHAT_PORT   Chat UI port (default: ${CHAT_PORT})
   XMLX_VLM_API_KEY     API key for auth
   XMLX_VLM_ARGS        Extra server args (e.g. "--enable-thinking --moe-top-k 4")
+  XMLX_VLM_DRAFT_MODEL Speculative drafter (default: ${DRAFT_MODEL}; set empty to disable)
+  XMLX_VLM_DRAFT_KIND  Drafter family (default: ${DRAFT_KIND})
+  XMLX_VLM_CHAT        Launch chat UI (default: true; set "false" to disable)
 
 Examples:
-  ./$(basename "$0") start --chat
-  ./$(basename "$0") start --chat --draft-model z-lab/Qwen3.6-35B-A3B-DFlash --draft-kind dflash
-  XMLX_VLM_API_KEY=mykey ./$(basename "$0") start --chat --kv-bits 3.5 --kv-quant-scheme turboquant
+  # Default start — chat UI + DFlash speculative decoding
+  ./$(basename "$0") start
+
+  # Disable chat UI, keep draft model
+  ./$(basename "$0") start --no-chat
+
+  # Custom auth + KV quantization
+  XMLX_VLM_API_KEY=mykey ./$(basename "$0") start --kv-bits 3.5 --kv-quant-scheme turboquant
+
+  # Disable speculative decoding entirely
+  XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./$(basename "$0") start
 EOF
         exit 1
         ;;

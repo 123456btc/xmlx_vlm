@@ -1,7 +1,11 @@
 # XMLX-VLM
 
 <p align="center">
-  <strong>Apple Silicon 上的生产级视觉语言推理引擎</strong>
+  <strong>隐私优先的本地视觉语言 AI</strong>
+</p>
+
+<p align="center">
+  <em>Apple Silicon 原生推理引擎。数据零外泄。零云 API 暴露。</em>
 </p>
 
 <p align="center">
@@ -19,123 +23,101 @@
 
 ## 🚀 为什么选 XMLX-VLM？
 
-**XMLX-VLM** 不是又一个模型加载器。我们面向的是需要在 Apple Silicon 上**真正跑通生产环境**的团队——那些不满足于"笔记本上能跑"，而是需要**可部署、可观测、可运维**的完整视觉语言栈的团队。
+**对于处理敏感数据的专业人士，隐私不是功能——它是底线。**
 
-我们站在两个优秀开源项目的肩膀上——[**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) 提供核心 VLM 加载能力，[**vllm-mlx**](https://github.com/vllm-project/vllm) 社区提供 serving 基础设施——然后补上了从"模型加载器"到"生产系统"之间缺失的每一层：可扩展的 API Server、投机解码、结构化输出、工具调用、Embedding & Rerank 引擎、SSD 持久化的前缀缓存，以及内置的运维套件。
+法律文件、医疗记录、政务档案、 proprietary 研究成果、交易策略——一旦它们经过云 API，你就失去了控制权。它们变成了别人的训练数据。它们被记录。它们可能被传唤。
 
-> 如果你在 Mac Studio、Mac Pro 或成规模的 M4 Max 集群上运行 VLM——这是唯一能帮你从"本机能跑"跨越到"生产可用"的完整栈。
+**XMLX-VLM** 是一个**本地优先、生产级的视觉语言推理引擎**，完全运行在 Apple Silicon 上。它读取文档、解析图片、推理复杂问题、输出结构化结果——**全程零网络调用**。
+
+没有云订阅。没有数据保留政策。没有第三方服务条款。只有你的 Mac、你的数据、你的模型。
+
+> **数据主权是架构本身。其他一切都是建立在这个基础之上。**
 
 ---
 
-## 🎯 产品能力
+## 🎯 这是为谁打造的？
+
+| 领域 | 敏感数据 | XMLX-VLM 在本地做什么 |
+|------|---------|---------------------|
+| **量化金融** |  proprietary 因子、内部研报、alpha 信号 | 本地解析 PDF 研报和图表；推理因子假设；输出结构化因子定义；通过 MCP 调用本地回测工具 |
+| **法律** | 案件卷宗、合同、证据材料、客户沟通记录 | 分析扫描文档和证据图片；提取结构化条款；推理法律论证；生成批注摘要 |
+| **政务** | 涉密简报、政策草案、公民档案、情报图像 | 处理敏感图像和扫描文档；结构化情报报告输出；完整审计轨迹保留在本地硬件 |
+| **医疗** | 患者病历、医学影像、临床笔记、检验结果 | 解析医疗文档图片；推理鉴别诊断；结构化临床摘要输出；架构层面 HIPAA 合规 |
+| **企业研发** | 商业机密、专利草稿、实验数据、内部备忘录 | 理解技术图纸的视觉语言；推理研究假设；结构化实验设计输出 |
+
+---
+
+## 🎯 核心能力
 
 | 能力 | 你得到什么 |
 |------|-----------|
-| **OpenAI + Claude 双协议 Server** | 一个 Server 同时说两种协议。OpenAI 端点（`/v1/chat/completions`、`/v1/embeddings`、`/v1/rerank`）和 Anthropic 端点（`/v1/messages`），支持流式 SSE、tool-use、reasoning blocks——全部开箱即用。 |
-| **SDK 零改动接入** | OpenAI SDK 或 Claude SDK 直接指向 `http://localhost:8080`——无需改代码。Cursor、Claude Code、LangChain、PydanticAI 全部原生支持。 |
-| **Gradio Chat UI** | 一条命令启动（`--chat`），自带 polished Web 界面，适合 demo、QA 和内部工具。 |
+| **本地文档智能** | 直接把 PDF、扫描件、截图、图文混排报告喂给模型。没有 OCR SaaS。没有云端视觉 API。你的文档永不离开 localhost。 |
+| **推理后的结构化输出** | 开启 `thinking` 模式进行深度推理，然后对最终输出强制执行 JSON-Schema 约束。审计级报告、因子定义、临床摘要的完美选择。 |
+| **双协议 API** | 一个 Server 同时说 OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两种协议。作为 Cursor、Claude Code、LangChain、PydanticAI 的后端——全部流量留在 `localhost:8080`。 |
+| **本地工具调用 & MCP** | 通过 MCP 连接本地数据库、回测器、电子病历系统、案件管理工具、文档流水线。模型调用你的工具；你的数据永不离开机器。 |
+| **Embedding & Rerank 用于私有知识** | 索引内部文档、研究笔记、案件卷宗、患者病史。在你的专有知识库上做语义搜索——零云端暴露。 |
+| **SSD 持久化前缀缓存** | 重复分析同一文档或系统 prompt 时毫秒级 warm-start，即使 server 重启后也是如此。缓存活在你的 SSD 上，不是别人的服务器。 |
+| **Gradio Chat UI** | 一条命令启动（`--chat`），用于本地 demo、内部评审会议、安全内部工具。 |
 | **Service Manager** | `service.sh` 一键守护进程化，含健康检查、日志轮转、端口管理、零停机重启。 |
 | **API Key 认证** | 通过环境变量轮换密钥。无需代理即可实现企业级访问控制。 |
-| **模型仓库 & 转换** | 一行命令把 Hugging Face 模型转成 MLX 格式。原生支持 Qwen、LLaVA、Phi-vision 等数十种模型。 |
-| **Batch 推理** | 单次处理多张图片 / 多条 prompt，智能内存调度。 |
-| **视觉缓存** | 智能特征缓存，重复的视觉 prompt 不再重复编码图片。 |
 
 ---
 
 ## ⚡ 技术优势
 
-### 1. Thinking-Aware 约束生成（Logits 层生命周期管理）
+### 1. Thinking-Aware 约束生成
 
-这是目前**没有任何其他开源推理引擎**具备的架构级能力。
-
-现代推理模型（Qwen3、DeepSeek-R1、Gemma4 等）会在 `<think>...</think>` 标签内输出思维链，然后才给出最终答案。业界处理这类模型的结构化输出只有两种**错误的**做法：
-
-| 做法 | 问题 |
-|------|------|
-| **全程约束** | JSON Schema 在 thinking 阶段就生效。模型无法正常推理——它被迫在自我独白中就开始编造结构。 |
-| **后处理解析** | 模型无约束生成，然后你祈祷正则能从尾巴里抠出合法 JSON。脆弱、非确定性、工具调用完全不可用。 |
-
-XMLX-VLM 在 **token 生成阶段**用四阶段状态机解决了这个问题：
+现代推理模型会在 `<think>...</think>` 标签内输出思维链。标准结构化输出引擎要么在 thinking 阶段崩掉，要么腐蚀 JSON。XMLX-VLM 在 **token 生成阶段**用四阶段状态机管理：
 
 ```
 IDLE ──► THINKING ──► TRANSITIONING ──► CONTENT
 ```
 
-- **THINKING** — 模型完全自由。JSON Schema、正则掩码、任何约束都不生效。我们只计数 `thinking_budget`。
-- **TRANSITIONING** — 预算耗尽（或模型自然输出了 end token）时，我们通过 logits masking **强制输出精确的 end-token 序列**（除目标 token 外全部 `-inf`）。保证 thinking 标签干净、确定性地闭合——没有半开标签，没有漂移。
-- **CONTENT** — thinking 标签闭合的**瞬间**，控制权交给内层 logits processor（JSON Schema、正则或 tool-parser）。第一个 content token 就已经受约束。
+- **THINKING** — 模型完全自由推理。JSON 约束不生效。可以探索假设、边界情况、矛盾点。
+- **TRANSITIONING** — 预算耗尽时，我们通过 logits masking **强制输出精确的 end-token 序列**（除目标 token 外全部 `-inf`）。干净、确定性地闭合。
+- **CONTENT** — thinking 标签闭合的**瞬间**，控制权交给内层 JSON-Schema processor。第一个 content token 就已经受约束。
 
-关键实现细节：
-- **BoundedSuffixMatcher** 以 O(1) 均摊时间检测 `<think>` / `</think>` token 序列，支持重叠前缀恢复。
-- **Snapshot/Rollback** 支持投机解码拒绝和动态 batching 下的状态回滚，不会 desync。
-- **Content-phase mask** 防止 `<think>` token 在 transition 后泄露回最终输出。
-- **Retirement signal** — 进入 CONTENT 且无内层约束时，processor 通知引擎丢弃自身并重新启用 MTP。
+结果：你的模型可以思考 512 个 token 来分析法律论证或医疗鉴别诊断，然后吐出一个完美合法的结构化 JSON——**零后处理**。
 
-结果：你的模型可以思考 512 个 token，然后吐出一个完美合法的 JSON 对象或 tool call——**零后处理**。
+### 2. SSD 持久化的自动前缀缓存（APC）
 
-### 2. 多格式推理解析器 + Tool-Call 提升
+当你反复迭代同一文档或系统 prompt 时，XMLX-VLM 跨请求复用 KV cache。对于混合 SSM/attention 模型（Qwen3.5 DeltaNet、Nemotron-H），**recurrent state 也一并被 snapshot 并持久化到 SSD**：
 
-六个专用流式解析器处理后处理侧：
+- 块级 KV cache，链式哈希标识
+- LRU + 引用计数淘汰
+- `APC_DISK_PATH` 把完整块写入分片 SSD 文件——**进程重启后仍能恢复**
+- 相同 prompt 毫秒级 warm-start，即使 server 重启后
 
-| 解析器 | 格式 | 特殊处理 |
-|--------|------|---------|
-| **Qwen3** | `<think>...</think>` | 隐式推理（prompt 中预注入 `<think>`） |
-| **DeepSeek-R1** | `<think>...</think>` | 缺失 start-tag 检测 |
-| **Gemma4** | `<start_of_thought>...<end_of_thought>` | 多轮 thought 块 |
-| **GLM4** | `<|channel>thought...<channel|>` | Channel-based 推理 |
-| **GPT-OSS** | 自定义分隔符 | OSS 推理轨迹格式 |
-| **Harmony** | 结构化 thinking | 多步推理链 |
+### 3. 多格式推理解析器 + Tool-Call 提升
 
-每个解析器实现流式状态机（`pre_think → thinking → content`），实时把 delta chunk 拆分为 `reasoning` 和 `content` 流。Server 通过 OpenAI 兼容的 `reasoning_content` 和 Anthropic 兼容的 `thinking` 块同时暴露两者。
+六个专用流式解析器处理 Qwen3、DeepSeek-R1、Gemma4、GLM4、GPT-OSS、Harmony 的 reasoning 提取。当 `<tool_call>` 块出现在 thinking 阶段时，它会被**自动提升到 content 流**——模型可以"思考要不要调用工具"然后真的调用。
 
-**Tool-Call Promotion**：当 `<tool_call>` 块出现在 thinking 阶段时，解析器自动将其提升到 content 流。闭合的 tool call 通过正则提取并追加到最终 content；未闭合的 call 在流结束时 flush 并告警。这意味着推理模型可以"思考要不要调用工具"然后真的调用——而不会把 tool XML 泄露到 reasoning 通道。
+### 4. Tool-Call 自动修复 + Jump-Forward 解码
 
-### 3. SSD 持久化的自动前缀缓存（APC）
+量化模型在多轮 tool call 后开始输出畸形标签。XMLX-VLM 两层防御：
 
-我们把 vLLM 的块级前缀缓存概念移植到了 MLX 运行时，然后加了**磁盘层**：
-- KV cache 拆分为 16-token 块，每块通过链式哈希（`H(prev_hash, token_slice, image_hash)`）标识。
-- LRU + 引用计数淘汰，热块常驻内存。
-- 当设置 `APC_DISK_PATH` 时，完整块写入分片 SSD 文件，**进程重启后仍能恢复**。
-- 相同 prompt 从毫秒级 warm-start，而不是秒级——即使 server 重启后也是如此。
+- **Auto-Recovery** — 修复未闭合 XML 标签、平衡截断 JSON 大括号、从混乱文本提取裸 JSON。
+- **Jump-Forward Logits Bias**（`--enable-tool-logits-bias`）— 对 tool-related token ID 施加加性偏置，更快推入结构化格式。
 
-**RNN State 支持**：APC 的 `exact` 模式现已支持 BatchKVCache、BatchRotatingKVCache 及所有 `_BaseCache` 子类。对于 Qwen3.5 Gated DeltaNet、Nemotron-H 等混合 SSM/attention 模型，recurrent state 随 KV tensor 一同被 deep-copy 和持久化——不是只有 KV 有效。
+### 5. 大规模投机解码
 
-### 4. 大规模投机解码
+- **DFlash** — 超轻量 draft 模型提前预测 2–3 个 token
+- **MTP**（Multi-Token Prediction）— 高熵 prompt 下的并行 draft 路径
 
-XMLX-VLM 自带**两族投机 draft 模型**：
-- **DFlash** — 超轻量 draft 模型，提前预测 2–3 个 token，几乎零开销。
-- **MTP**（Multi-Token Prediction）— 高熵 prompt 下的并行 draft 路径。
-
-配合自适应接受阈值，投机路径可显著削减长文本生成的首 token 时间。
-
-### 5. Tool-Call 自动修复 + Jump-Forward 解码
-
-量化模型在生产环境里的经典问题：多轮 tool call 后开始输出畸形 XML 标签或截断 JSON。XMLX-VLM 增加两层互补防御：
-
-- **Auto-Recovery** — 主解析器失败后，启发式修复层会闭合未闭合标签、平衡截断 JSON 的大括号、从混乱文本中提取裸 JSON 对象。闭合的 tool call 提升为结构化输出；未闭合的 flush 并告警。
-- **Jump-Forward Logits Bias**（`--enable-tool-logits-bias`）— 对 tool-related token ID（`<tool_call>`、`{`、`"name"` 等）施加加性偏置，更快推入结构化格式，不改变 temperature 或 top-p。
+削减长文档分析和推理任务的延迟。
 
 ### 6. KV-Cache 量化
 
-统一内存架构上，内存是瓶颈。我们支持：
-- **Uniform quantization**（4-bit、3.5-bit、8-bit）
-- **TurboQuant** — 自适应策略，在关键位置保留 attention 精度，在无关位置压缩。
+- **Uniform**（4-bit、3.5-bit、8-bit）
+- **TurboQuant** — 自适应策略，在关键位置保留 attention 精度
+
+128 GB Mac Studio 上运行 70B 级 vision 模型，长文档上下文仍有充裕空间。
 
 ### 7. MoE Top-K 覆盖
 
-MoE 模型是新标准，但默认路由浪费 cycle。XMLX-VLM 暴露**动态 top-k 覆盖**，让你在延迟敏感场景用极小的精度损失换取巨大的延迟收益。
+动态 top-k 覆盖，在交互式分析会话中用极小的精度损失换取巨大的延迟收益。
 
-### 8. 工具调用 & MCP（Model Context Protocol）
-
-- 从模型 processor 自动推断 tool-parser
-- 可插拔 tool 模块
-- 内置 **MCP Manager**，通过 stdio 或 SSE 连接外部数据源、IDE 和 agent 框架
-
-### 9. Embedding & Rerank 引擎
-
-**单一进程**同时 serving **视觉语言对话**、**文本 Embedding** 和 **Rerank**。无需运行独立的 embedding 微服务——减少网络跳转和上下文切换开销。
-
-### 10. Apple Silicon 原生优化
+### 8. Apple Silicon 原生优化
 
 - Flash Attention 通过 `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion 加速视觉编码器
@@ -148,17 +130,20 @@ MoE 模型是新标准，但默认路由浪费 cycle。XMLX-VLM 暴露**动态 t
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        客户端层                               │
-│  (OpenAI SDK、LangChain、curl、Gradio UI、Agent 框架)        │
+│                     私有 AI Agent & 客户端                    │
+│  (Cursor、Claude Code、LangChain、PydanticAI、AFRE agents)   │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
-│                      XMLX-VLM Server                         │
+│                   XMLX-VLM Server（本地）                     │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
 │  │   Chat API  │ │ Embeddings  │ │  Rerank / Classify  │   │
+│  │ (OpenAI +   │ │  (私有知识  │ │  (文档 / 案件       │   │
+│  │  Anthropic) │ │   记忆)     │ │   检索)             │   │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘   │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
 │  │  Tool Parse │ │    MCP      │ │ Structured Output   │   │
+│  │ (本地数据库) │ │ (内部系统)  │ │ (审计级 JSON)       │   │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -166,6 +151,7 @@ MoE 模型是新标准，但默认路由浪费 cycle。XMLX-VLM 暴露**动态 t
 │                     推理核心                                   │
 │  ┌──────────────┐ ┌─────────────┐ ┌─────────────────────┐  │
 │  │   Generate   │ │   Batch     │ │  Speculative Draft  │  │
+│  │  (推理)      │ │  (文档)     │ │  (延迟削减)         │  │
 │  └──────────────┘ └─────────────┘ └─────────────────────┘  │
 │  ┌──────────────┐ ┌─────────────┐ ┌─────────────────────┐  │
 │  │ KV Quantize  │ │  MoE Top-K  │ │  Vision Cache       │  │
@@ -195,24 +181,23 @@ pip install -e .
 ### 启动服务
 
 ```bash
-# 基础服务
+# 默认启动 — chat UI + DFlash 投机解码（推荐）
 ./service.sh start
 
-# 服务 + Chat UI
-./service.sh start --chat
+# 禁用 chat UI（纯 server 模式）
+./service.sh start --no-chat
 
-# 投机解码 + KV 量化
-./service.sh start --chat \
-  --draft-model mlx-community/Qwen3.6-35B-A3B-DFlash \
-  --draft-kind dflash \
-  --kv-bits 3.5 \
-  --kv-quant-scheme turboquant
+# 添加 API key + KV 量化，用于生产负载
+XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
 
-# 启用 tool-call 加速
-./service.sh start --chat --enable-tool-logits-bias
+# 启用 tool-call 加速，用于 MCP 密集型工作流
+./service.sh start --enable-tool-logits-bias
+
+# 完全禁用投机解码（回退到标准生成）
+XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 ```
 
-### 调用 API
+### 调用 API（仅限本地）
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -220,7 +205,7 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{
     "model": "mlx-community/qwen3.6-35B-A3B-4bit",
     "messages": [
-      {"role": "user", "content": "描述这张图片"}
+      {"role": "user", "content": "分析附件文档并提取结构化发现"}
     ],
     "stream": true
   }'
@@ -244,14 +229,14 @@ curl http://localhost:8080/v1/chat/completions \
 
 - **PID 追踪** + orphan 进程兜底
 - **端口冲突**自动解决
-- **`/health` 健康端点**，可直接对接负载均衡
+- **`/health` 健康端点**
 - **结构化日志**，rotation-friendly
 
 ---
 
 ## 🧩 支持模型
 
-- **Qwen-VL / Qwen2-VL / Qwen3.6-VL**（推荐）
+- **Qwen-VL / Qwen2-VL / Qwen3.6-VL**（推荐，CJK 文档友好）
 - **LLaVA 1.5 / 1.6 / NeXT**
 - **Phi-3 / Phi-4 Vision**
 - **InternVL2**
@@ -299,6 +284,6 @@ XMLX-VLM 是一个**hard-fork**，有意识地建立在多个杰出开源项目�
 ---
 
 <p align="center">
-  <strong>Built for teams who ship.</strong><br>
-  如果 XMLX-VLM 加速了你的视觉流水线，请给我们点一颗 ⭐
+  <strong>你的数据。你的模型。你的隐私。</strong><br>
+  如果 XMLX-VLM 保护了你的敏感流水线，请给我们点一颗 ⭐
 </p>

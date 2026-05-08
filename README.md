@@ -1,7 +1,11 @@
 # XMLX-VLM
 
 <p align="center">
-  <strong>The Production-Ready Vision-Language Inference Engine for Apple Silicon</strong>
+  <strong>Privacy-First Local Vision-Language AI</strong>
+</p>
+
+<p align="center">
+  <em>Apple Silicon-native inference engine. Zero data leaves your machine. Zero exposure to cloud APIs.</em>
 </p>
 
 <p align="center">
@@ -19,114 +23,97 @@
 
 ## 🚀 Why XMLX-VLM?
 
-**XMLX-VLM** is an opinionated hard-fork built for teams that need **more than just inference** on Apple Silicon — they need a **complete, deployable, observable Vision-Language stack**.
+**For professionals who handle sensitive data, privacy is not a feature — it is the baseline.**
 
-We stand on the shoulders of two excellent open-source projects — [**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) for the core VLM loader and [**vllm-mlx**](https://github.com/vllm-project/vllm) community patterns for serving infrastructure — then added the missing layers that turn a model loader into a **production system**: a scalable API server, speculative decoding, structured output, tool calling, embedding & reranking engines, automatic prefix caching with SSD persistence, and a built-in operations suite.
+Legal documents, medical records, government files, proprietary research, trading algorithms — the moment they pass through a cloud API, you lose control. They become training data. They get logged. They get subpoenaed.
 
-> If you run VLMs on Mac Studio, Mac Pro, or a fleet of M4 Max machines — this is the stack that closes the gap between "it works on my laptop" and "it runs in production."
+**XMLX-VLM** is a **local-first, production-grade Vision-Language inference engine** that runs entirely on Apple Silicon. It reads documents, parses images, reasons through complex problems, and emits structured outputs — **without a single network call**.
+
+No cloud subscription. No data retention policy. No third-party terms of service. Just your Mac, your data, and your models.
+
+> **Data sovereignty is the architecture. Everything else is built on top of it.**
 
 ---
 
-## 🎯 Product Features
+## 🎯 Who Is This For?
+
+| Domain | Sensitive Data | What XMLX-VLM Does Locally |
+|--------|---------------|---------------------------|
+| **Quantitative Finance** | Proprietary factors, internal research reports, alpha signals | Parse PDF reports and chart images; reason through factor hypotheses; emit structured factor definitions; call local backtesters via MCP |
+| **Legal** | Case files, contracts, discovery documents, client communications | Analyze document images and scans; extract structured clauses; reason through legal arguments; generate redlined summaries |
+| **Government** | Classified briefings, policy drafts, citizen records, intelligence imagery | Process sensitive imagery and scanned documents; structured output for intelligence reports; full audit trail on local hardware |
+| **Healthcare** | Patient records, medical imaging, clinical notes, lab results | Parse medical document images; reason through differential diagnoses; structured output for clinical summaries; HIPAA-compliant by architecture |
+| **Enterprise R&D** | Trade secrets, patent drafts, experimental data, internal memos | Vision-language understanding of technical diagrams; reasoning through research hypotheses; structured output for experiment designs |
+
+---
+
+## 🎯 Core Capabilities
 
 | Capability | What You Get |
 |------------|-------------|
-| **OpenAI + Claude Dual-Protocol Server** | One server speaks both protocols. OpenAI endpoints (`/v1/chat/completions`, `/v1/embeddings`, `/v1/rerank`) and Anthropic endpoints (`/v1/messages`) with streaming SSE, tool-use, and reasoning blocks—all out of the box. |
-| **Drop-in SDK Replacement** | Point OpenAI SDK or Claude SDK at `http://localhost:8080`—zero code changes. Cursor, Claude Code, LangChain, PydanticAI all work natively. |
-| **Gradio Chat UI** | One-command launch (`--chat`) gives you a polished web interface for demos, QA, and internal tooling. |
+| **Local Document Intelligence** | Feed PDFs, scanned documents, screenshots, and image-heavy reports directly into the model. No OCR SaaS. No cloud vision API. Your documents never leave localhost. |
+| **Structured Output with Reasoning** | Enable `thinking` mode for deep reasoning, then enforce JSON-Schema constraints on the final output. Perfect for audit-ready reports, factor definitions, and clinical summaries. |
+| **Dual-Protocol API** | One server speaks both OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) protocols. Drop in as the backend for Cursor, Claude Code, LangChain, PydanticAI — all traffic stays on `localhost:8080`. |
+| **Local Tool Calling & MCP** | Connect to local databases, backtesters, EHR systems, case-management tools, and document pipelines via MCP. The model calls your tools; your data never leaves the machine. |
+| **Embedding & Rerank for Private Knowledge** | Index internal documents, research notes, case files, and patient histories. Semantic search over your proprietary knowledge base — with zero cloud exposure. |
+| **SSD-Persistent Prefix Cache** | Repeated analysis of the same document or system prompt warm-starts in milliseconds, even after server restart. The cache lives on your SSD, not someone else's server. |
+| **Gradio Chat UI** | One-command launch (`--chat`) for local demos, internal review sessions, and secure internal tooling. |
 | **Service Manager** | `service.sh` handles daemonization, health checks, log rotation, port management, and zero-downtime restarts. |
 | **API Key Auth** | Rotate keys via environment variables. Enterprise-grade access control without a proxy. |
-| **Model Zoo & Conversion** | One-line conversion from Hugging Face to MLX format. Native support for Qwen, LLaVA, Phi-vision, and dozens more. |
-| **Batch Inference** | Process multiple images / prompts in a single pass with intelligent memory scheduling. |
-| **Vision Cache** | Intelligent feature caching so repeated visual prompts do not re-encode the image. |
 
 ---
 
 ## ⚡ Technical Advantages
 
-### 1. Thinking-Aware Constrained Generation (Logits-Level Lifecycle Management)
+### 1. Thinking-Aware Constrained Generation
 
-This is the architectural capability that no other open-source inference engine offers today.
+Most reasoning models emit a chain-of-thought inside `<think>...</think>` tags. Standard structured-output engines either break during thinking or corrupt the JSON. XMLX-VLM manages a **four-phase logits state machine** (`IDLE → THINKING → TRANSITIONING → CONTENT`) at the token level:
 
-Modern reasoning models (Qwen3, DeepSeek-R1, Gemma4, etc.) emit a chain-of-thought inside `<think>...</think>` tags before producing the final answer. The industry has two broken approaches to structured output with these models:
+- **THINKING** — The model reasons freely. No JSON constraints. It can explore assumptions, edge cases, and contradictions.
+- **TRANSITIONING** — When the budget expires, we **force the end-token sequence via logits masking** (`-inf` everywhere except the target). Clean, deterministic exit.
+- **CONTENT** — The instant thinking closes, control hands to the inner JSON-Schema processor. The first content token is already constrained.
 
-| Approach | Problem |
-|----------|---------|
-| **Constraint everywhere** | The JSON Schema is enforced during the thinking phase. The model cannot reason freely — it starts hallucinating structure inside its own monologue. |
-| **Post-process parsing** | The model generates unconstrained text, then you pray a regex extracts valid JSON from the tail. Fragile, non-deterministic, and unusable for tool calling. |
+Result: your model can think for 512 tokens about a legal argument or medical differential, then emit a perfectly valid structured JSON — with zero post-processing.
 
-XMLX-VLM solves this at the **logits level** with a four-phase state machine that lives inside the token loop:
+### 2. Automatic Prefix Caching with SSD Persistence (APC)
 
-```
-IDLE ──► THINKING ──► TRANSITIONING ──► CONTENT
-```
+When you iterate on the same document or system prompt, XMLX-VLM reuses the KV cache across requests. For hybrid SSM/attention models (Qwen3.5 DeltaNet, Nemotron-H), the **recurrent state is also snapshotted and persisted to SSD**:
 
-- **THINKING** — The model is free. No JSON Schema, no regex mask, no constraints. It can ramble, backtrack, and explore. We only count tokens against a configurable `thinking_budget`.
-- **TRANSITIONING** — When the budget expires (or the model naturally emits the end token), we **force the exact end-token sequence via logits masking** (`-inf` everywhere except the target token). This guarantees a clean, deterministic exit from the thinking span — no half-open tags, no drift.
-- **CONTENT** — The instant the thinking span closes, control is handed to the inner logits processor (JSON Schema, regex, or tool-parser). The very first content token is already constrained.
+- Block-level KV cache with chained hashing
+- LRU + reference-count eviction
+- `APC_DISK_PATH` writes full blocks to sharded SSD files — **survives process restart**
+- Identical prompts warm-start in milliseconds, even after a server restart
 
-Key implementation details:
-- **BoundedSuffixMatcher** with overlapping-prefix recovery detects `<think>` / `</think>` token sequences in O(1) amortized time.
-- **Snapshot/rollback** support means the state machine survives speculative-decoding rejections and dynamic batching without desync.
-- **Content-phase mask** prevents `<think>` tokens from leaking back into the final output after transition.
-- **Retirement signal** — once the processor reaches CONTENT with no inner constraint, it signals the engine to drop itself and re-enable MTP for the remaining generation.
+### 3. Multi-Format Reasoning Parsers + Tool-Call Promotion
 
-Result: your model can think for 512 tokens, then emit a perfectly valid JSON object or tool call — with zero post-processing.
+Six streaming parsers handle reasoning extraction for Qwen3, DeepSeek-R1, Gemma4, GLM4, GPT-OSS, and Harmony. When a `<tool_call>` block appears inside the thinking phase, it is **automatically promoted to the content stream** — so the model can "think about calling a tool" and actually call it.
 
-### 2. Multi-Format Reasoning Parsers + Tool-Call Promotion
+### 4. Tool-Call Auto-Recovery + Jump-Forward Decoding
 
-Six dedicated streaming parsers handle the post-processing side:
+Quantized models degrade after multiple tool rounds. XMLX-VLM adds two defenses:
 
-| Parser | Format | Special Handling |
-|--------|--------|-----------------|
-| **Qwen3** | `<think>...</think>` | Implicit reasoning (prompt-injected `<think>`) |
-| **DeepSeek-R1** | `<think>...</think>` | Missing start-tag detection |
-| **Gemma4** | `<start_of_thought>...<end_of_thought>` | Multi-turn thought blocks |
-| **GLM4** | `<|channel>thought...<channel|>` | Channel-based reasoning |
-| **GPT-OSS** | Custom delimiter | OSS reasoning trace format |
-| **Harmony** | Structured thinking | Multi-step reasoning chains |
+- **Auto-Recovery** — Repairs unclosed XML tags, balances truncated JSON braces, and extracts bare JSON objects from garbled output.
+- **Jump-Forward Logits Bias** (`--enable-tool-logits-bias`) — Additive bias on tool-related token IDs pushes the model faster into structured format, cutting time-to-first-tool-token.
 
-Each parser implements a streaming state machine (`pre_think → thinking → content`) that splits delta chunks into `reasoning` and `content` streams in real time. The server exposes both via OpenAI-compatible `reasoning_content` and Anthropic-compatible `thinking` blocks.
+### 5. Speculative Decoding at Scale
 
-**Tool-Call Promotion**: When a `<tool_call>` block appears inside the thinking span, the parser automatically promotes it to the content stream. Closed tool calls are extracted via regex and appended to the final content; unclosed calls are flushed at stream end with a warning. This means a reasoning model can "think about calling a tool" and actually call it — without the tool XML leaking into the reasoning channel.
+- **DFlash** — ultra-light draft models predict 2–3 tokens ahead
+- **MTP** (Multi-Token Prediction) — parallel draft paths for high-entropy prompts
 
-### 3. Automatic Prefix Caching with SSD Persistence (APC)
+Cuts latency on long-form document analysis and reasoning tasks.
 
-We ported the block-level prefix-caching concept from vLLM down to the MLX runtime, then added a **disk tier**:
-- KV cache is split into 16-token blocks, each identified by a chained hash (`H(prev_hash, token_slice, image_hash)`).
-- LRU eviction with reference counting keeps hot blocks in memory.
-- When `APC_DISK_PATH` is set, full blocks are written to sharded SSD files and survive process restarts.
-- Identical prompts warm-start in milliseconds instead of seconds — even after a server restart.
+### 6. KV-Cache Quantization
 
-### 4. Speculative Decoding at Scale
+- **Uniform** (4-bit, 3.5-bit, 8-bit)
+- **TurboQuant** — adaptive scheme preserving attention precision where it matters
 
-XMLX-VLM ships with **two speculative drafter families**:
-- **DFlash** — ultra-light draft models that predict 2–3 tokens ahead with near-zero overhead.
-- **MTP** (Multi-Token Prediction) — parallel draft paths for high-entropy prompts.
+Run 70B-class vision models on a 128 GB Mac Studio with headroom for long-context documents.
 
-Combined with adaptive acceptance thresholds, speculative paths can significantly cut time-to-first-token on long-form generation.
+### 7. MoE Top-K Override
 
-### 5. KV-Cache Quantization
+Dynamic top-k override lets you trade a fraction of accuracy for latency wins in interactive analysis sessions.
 
-Memory is the bottleneck on unified-memory architectures. We support:
-- **Uniform quantization** (4-bit, 3.5-bit, 8-bit)
-- **TurboQuant** — an adaptive scheme that preserves attention precision where it matters and compresses where it does not.
-
-### 6. MoE Top-K Override
-
-Mixture-of-Experts models are the new standard, but default routing wastes cycles. XMLX-VLM exposes **dynamic top-k override** so you can trade a fraction of accuracy for latency wins in latency-sensitive workloads.
-
-### 8. Tool Calling & MCP (Model Context Protocol)
-
-- Automatic tool-parser inference from the model processor
-- Pluggable tool modules
-- Built-in **MCP Manager** for connecting to external data sources, IDEs, and agent frameworks via stdio or SSE
-
-### 9. Embedding & Rerank Engines
-
-A single process serves **vision-language chat**, **text embeddings**, and **reranking**. No need to run a separate embedding micro-service — reduce network hops and context-switching overhead.
-
-### 10. Apple-Silicon Native Optimization
+### 8. Apple-Silicon Native Optimization
 
 - Flash Attention via `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion for vision encoders
@@ -139,17 +126,21 @@ A single process serves **vision-language chat**, **text embeddings**, and **rer
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Client Layer                          │
-│  (OpenAI SDK, LangChain, curl, Gradio UI, Agent frameworks) │
+│                  Private AI Agents & Clients                 │
+│  (Cursor, Claude Code, LangChain, PydanticAI, AFRE agents)  │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
-│                      XMLX-VLM Server                         │
+│                   XMLX-VLM Server (local)                    │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
 │  │   Chat API  │ │ Embeddings  │ │  Rerank / Classify  │   │
+│  │ (OpenAI +   │ │  (private   │ │  (document / case   │   │
+│  │  Anthropic) │ │   memory)   │ │   retrieval)        │   │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘   │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
 │  │  Tool Parse │ │    MCP      │ │ Structured Output   │   │
+│  │ (local DBs) │ │ (internal   │ │ (audit-ready JSON)  │   │
+│  │             │ │  systems)   │ │                     │   │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -157,6 +148,7 @@ A single process serves **vision-language chat**, **text embeddings**, and **rer
 │                     Inference Core                           │
 │  ┌──────────────┐ ┌─────────────┐ ┌─────────────────────┐  │
 │  │   Generate   │ │   Batch     │ │  Speculative Draft  │  │
+│  │  (reasoning) │ │  (docs)     │ │  (latency cut)      │  │
 │  └──────────────┘ └─────────────┘ └─────────────────────┘  │
 │  ┌──────────────┐ ┌─────────────┐ ┌─────────────────────┐  │
 │  │ KV Quantize  │ │  MoE Top-K  │ │  Vision Cache       │  │
@@ -186,21 +178,23 @@ pip install -e .
 ### Start the Server
 
 ```bash
-# Basic server
+# Default start — chat UI + DFlash speculative decoding (recommended)
 ./service.sh start
 
-# Server + Chat UI
-./service.sh start --chat
+# Disable chat UI (headless server mode)
+./service.sh start --no-chat
 
-# With speculative decoding & KV quantization
-./service.sh start --chat \
-  --draft-model mlx-community/Qwen3.6-35B-A3B-DFlash \
-  --draft-kind dflash \
-  --kv-bits 3.5 \
-  --kv-quant-scheme turboquant
+# Add API key + KV quantization for production workloads
+XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
+
+# Enable tool-call acceleration for MCP-heavy workflows
+./service.sh start --enable-tool-logits-bias
+
+# Disable speculative decoding entirely (fallback to standard generation)
+XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 ```
 
-### Call the API
+### Call the API (Local Only)
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -208,7 +202,7 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{
     "model": "mlx-community/qwen3.6-35B-A3B-4bit",
     "messages": [
-      {"role": "user", "content": "Describe this image"}
+      {"role": "user", "content": "Analyze the attached document and extract structured findings"}
     ],
     "stream": true
   }'
@@ -232,14 +226,14 @@ curl http://localhost:8080/v1/chat/completions \
 
 - **PID tracking** with orphan-process fallback
 - **Port collision** auto-resolution
-- **Health endpoint** at `/health` for load-balancer integration
+- **Health endpoint** at `/health`
 - **Structured logs** with rotation-friendly output
 
 ---
 
 ## 🧩 Supported Models
 
-- **Qwen-VL / Qwen2-VL / Qwen3.6-VL** (recommended)
+- **Qwen-VL / Qwen2-VL / Qwen3.6-VL** (recommended for CJK documents)
 - **LLaVA 1.5 / 1.6 / NeXT**
 - **Phi-3 / Phi-4 Vision**
 - **InternVL2**
@@ -251,14 +245,13 @@ curl http://localhost:8080/v1/chat/completions \
 
 ## 🏛 Acknowledgments & Lineage
 
-XMLX-VLM is a **hard-fork** that consciously builds on top of several outstanding open-source projects:
+XMLX-VLM is a **hard-fork** that consciously builds on several outstanding open-source projects:
 
 | Project | What We Borrowed | What We Added |
 |---------|-----------------|---------------|
 | [**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) | Core VLM model loading, weight conversion, and MLX generation primitives | Production server, speculative decoding, structured output, tool calling, MCP, embedding/rerank engines |
 | [**vllm-mlx**](https://github.com/vllm-project/vllm) (community patterns) | Metrics design, model registry patterns, hardware detection concepts | SSD-persistent APC cache, Apple-Silicon-specific memory budgeting, unified CLI |
 | [**Rapid-MLX**](https://github.com/raullenchai/Rapid-MLX) | Tool-call auto-recovery, jump-forward logits bias, DeltaNet state snapshots | Adapted auto-recovery and jump-forward decoding; inspired hybrid-cache architecture roadmap |
-| **Anthropic SDK** | Message format and tool-use schema | First-class `/v1/messages` endpoint with streaming, tool results, and thinking blocks |
 | [**llama.cpp**](https://github.com/ggerganov/llama.cpp) | Mixed quantization predicates (Q4_K_M-style strategies) | Integration into the MLX conversion pipeline |
 | [**Hugging Face Transformers**](https://github.com/huggingface/transformers) | Tokenizer utilities, sampling logic, AutoModel loading | MLX-native weight conversion, batch streaming, thinking-aware processors |
 
@@ -288,6 +281,6 @@ We are deeply grateful to the authors and communities behind these projects. XML
 ---
 
 <p align="center">
-  <strong>Built for teams who ship.</strong><br>
-  Star ⭐ the repo if XMLX-VLM accelerates your vision pipeline.
+  <strong>Your data. Your models. Your privacy.</strong><br>
+  Star ⭐ the repo if XMLX-VLM protects your sensitive pipeline.
 </p>
