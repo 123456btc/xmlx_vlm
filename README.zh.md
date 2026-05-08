@@ -200,7 +200,31 @@ IDLE ──► THINKING ──► TRANSITIONING ──► CONTENT
 
 ## 🚦 快速开始
 
-### 安装
+### 一键安装（macOS Apple Silicon）
+
+全新 Mac 或没有开发工具的用户：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/123456btc/xmlx_vlm/master/install.sh | bash
+```
+
+该脚本全自动完成：
+- ✅ 检测 Apple Silicon（M1/M2/M3/M4）
+- ✅ 安装 Xcode Command Line Tools（如缺失）
+- ✅ 安装 Homebrew（如缺失）
+- ✅ 安装 Python 3.12（如低于 3.10）
+- ✅ 安装 `uv`（高速 Python 包管理器）
+- ✅ 克隆仓库并创建虚拟环境
+- ✅ 安装 MLX、XMLX-VLM 及全部依赖
+- ✅ 设置默认 API key（`x123456`）和环境变量
+- ✅ 可选预下载默认模型（~20GB）
+- ✅ 启动服务
+
+**预计耗时：** 全新 Mac 上 10-20 分钟（主要是模型下载）。
+
+### 手动安装
+
+如果你偏好手动：
 
 ```bash
 git clone https://github.com/123456btc/xmlx_vlm.git

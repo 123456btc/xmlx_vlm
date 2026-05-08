@@ -198,7 +198,31 @@ Dynamic top-k override lets you trade a fraction of accuracy for latency wins in
 
 ## 🚦 Quick Start
 
-### Install
+### One-Click Install (macOS Apple Silicon)
+
+For fresh Macs or users without dev tools:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/123456btc/xmlx_vlm/master/install.sh | bash
+```
+
+This script automatically:
+- ✅ Checks Apple Silicon (M1/M2/M3/M4)
+- ✅ Installs Xcode Command Line Tools (if missing)
+- ✅ Installs Homebrew (if missing)
+- ✅ Installs Python 3.12 (if < 3.10)
+- ✅ Installs `uv` (fast Python package manager)
+- ✅ Clones the repo and creates virtual environment
+- ✅ Installs MLX, XMLX-VLM, and all dependencies
+- ✅ Sets default API key (`x123456`) and environment variables
+- ✅ Optionally pre-downloads the default model (~20GB)
+- ✅ Starts the server
+
+**Expected time:** 10-20 minutes on a fresh Mac (mostly downloading models).
+
+### Manual Install
+
+If you prefer manual setup:
 
 ```bash
 git clone https://github.com/123456btc/xmlx_vlm.git
