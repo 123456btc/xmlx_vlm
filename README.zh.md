@@ -141,7 +141,7 @@ IDLE ──► THINKING ──► TRANSITIONING ──► CONTENT
 
 - Flash Attention 通过 `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion 加速视觉编码器
-- 硬件感知内存预算（M1 → M4 Ultra 配置文件内置）
+- 硬件感知内存预算（M1 → M5 Max 配置文件内置）
 - CPU 预处理与 GPU 推理之间的统一内存零拷贝
 
 ---
@@ -209,7 +209,7 @@ curl -fsSL https://raw.githubusercontent.com/123456btc/xmlx_vlm/master/install.s
 ```
 
 该脚本全自动完成：
-- ✅ 检测 Apple Silicon（M1/M2/M3/M4）
+- ✅ 检测 Apple Silicon（M1/M2/M3/M4/M5）
 - ✅ 安装 Xcode Command Line Tools（如缺失）
 - ✅ 安装 Homebrew（如缺失）
 - ✅ 安装 Python 3.12（如低于 3.10）

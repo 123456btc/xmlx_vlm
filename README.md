@@ -137,7 +137,7 @@ Dynamic top-k override lets you trade a fraction of accuracy for latency wins in
 
 - Flash Attention via `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion for vision encoders
-- Hardware-aware memory budgeting (M1 → M4 Ultra profiles baked in)
+- Hardware-aware memory budgeting (M1 → M5 Max profiles baked in)
 - Unified-memory zero-copy between CPU pre-processing and GPU inference
 
 ---
@@ -207,7 +207,7 @@ curl -fsSL https://raw.githubusercontent.com/123456btc/xmlx_vlm/master/install.s
 ```
 
 This script automatically:
-- ✅ Checks Apple Silicon (M1/M2/M3/M4)
+- ✅ Checks Apple Silicon (M1/M2/M3/M4/M5)
 - ✅ Installs Xcode Command Line Tools (if missing)
 - ✅ Installs Homebrew (if missing)
 - ✅ Installs Python 3.12 (if < 3.10)
