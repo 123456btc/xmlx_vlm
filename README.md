@@ -275,9 +275,12 @@ We are deeply grateful to the authors and communities behind these projects. XML
 - [x] Embedding & Rerank engines
 - [x] Automatic Prefix Caching with SSD persistence
 - [x] Thinking-aware structured generation
-- [ ] LoRA serving (hot-swap adapters)
-- [ ] Multi-GPU pipeline parallelism
-- [ ] Community benchmark suite (contributions welcome!)
+- [x] Tool-call auto-recovery + Jump-Forward decoding
+- [x] LoRA training & adapter loading
+- [~] LoRA hot-swap serving (training & loading work; runtime adapter switching needs server API)
+- [~] Tensor / Pipeline Parallelism (utils layer supports `mx.distributed`; server integration pending)
+- [x] Built-in benchmark (TTFT / TPOT / TPS / memory)
+- [ ] Cross-engine benchmark suite (contributions welcome!)
 
 **License:** MIT  
 **Origin:** Hard-fork from [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) — rebuilt for production workloads.

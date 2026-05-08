@@ -287,9 +287,11 @@ XMLX-VLM 是一个**hard-fork**，有意识地建立在多个杰出开源项目�
 - [x] SSD 持久化的自动前缀缓存
 - [x] Thinking-aware 结构化生成
 - [x] Tool-call 自动修复 + Jump-Forward 解码
-- [ ] LoRA serving（热插拔 adapter）
-- [ ] Multi-GPU 流水线并行
-- [ ] 社区 benchmark 套件（欢迎贡献！）
+- [x] LoRA 训练与 adapter 加载
+- [~] LoRA 热切换 serving（训练与加载已可用；运行时切换 adapter 需 server API）
+- [~] Tensor / Pipeline Parallelism（utils 层已支持 `mx.distributed`；server 集成待完成）
+- [x] 内置 benchmark（TTFT / TPOT / TPS / 内存）
+- [ ] 跨引擎 benchmark 套件（欢迎贡献！）
 
 **License:** MIT  
 **起源:** Hard-fork 自 [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) —— 为生产负载重建。
