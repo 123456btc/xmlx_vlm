@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xxmlx-vlm"
+dynamic = ["version", "dependencies"]
+description = "XMLX-VLM is a enhanced fork of MLX-VLM for inference and fine-tuning of Vision Language Models (VLMs) on Apple Silicon."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Prince Canuma", email = "prince.gdt@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/Blaizzy/mlx-vlm"
+Repository = "https://github.com/Blaizzy/mlx-vlm"
+Issues = "https://github.com/Blaizzy/mlx-vlm/issues"
+
+[project.scripts]
+"xmlx_vlm.chat_ui" = "xmlx_vlm.chat_ui:main"
+"xmlx_vlm.chat_server" = "xmlx_vlm.chat_server:main"
+"xmlx_vlm.chat" = "xmlx_vlm.chat:main"
+"xmlx_vlm.convert" = "xmlx_vlm.convert:main"
+"xmlx_vlm.generate" = "xmlx_vlm.generate:main"
+"xmlx_vlm.server" = "xmlx_vlm.server:main"
+"xmlx_vlm" = "xmlx_vlm.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["xmlx_vlm*"]
+exclude = ["xmlx_vlm.tests*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "xmlx_vlm.version.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+[project.optional-dependencies]
+ui = ["gradio>=5.19.0"]
+cuda = ["mlx-cuda"]
+cpu = ["mlx-cpu"]

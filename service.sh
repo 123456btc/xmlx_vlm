@@ -1,0 +1,368 @@
+#!/bin/bash
+# XMLX VLM Service Manager
+# Usage:
+#   ./service.sh start [--chat]     Start server (optionally with chat UI)
+#   ./service.sh stop               Stop server and chat UI
+#   ./service.sh restart [--chat]   Restart server
+#   ./service.sh status             Show running status
+#
+# Configurable via environment variables (or edit defaults below):
+#   XMLX_VLM_MODEL       Default model to load
+#   XMLX_VLM_PORT        Server port (default: 8080)
+#   XMLX_VLM_CHAT_PORT   Chat UI port (default: 7860)
+#   XMLX_VLM_API_KEY     API key for auth
+#   XMLX_VLM_ARGS        Extra args passed to server (e.g. --enable-thinking)
+#
+# Direct server options (passed through to server):
+#   --draft-model MODEL         Speculative drafter model
+#   --draft-kind {dflash,mtp}   Drafter family
+#   --kv-bits BITS              KV cache quantization bits
+#   --kv-quant-scheme SCHEME    {uniform,turboquant}
+
+set -euo pipefail
+
+# ─── Configuration ──────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_PYTHON="${SCRIPT_DIR}/.venv/bin/python3"
+PID_DIR="${SCRIPT_DIR}/.pids"
+LOG_DIR="${SCRIPT_DIR}/.logs"
+
+MODEL="${XMLX_VLM_MODEL:-mlx-community/qwen3.6-35B-A3B-4bit}"
+PORT="${XMLX_VLM_PORT:-8080}"
+CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
+API_KEY="${XMLX_VLM_API_KEY:-}"
+EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
+
+SERVER_PID_FILE="${PID_DIR}/server.pid"
+CHAT_PID_FILE="${PID_DIR}/chat.pid"
+SERVER_LOG="${LOG_DIR}/server.log"
+CHAT_LOG="${LOG_DIR}/chat.log"
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+ensure_dirs() {
+    mkdir -p "${PID_DIR}" "${LOG_DIR}"
+}
+
+is_running() {
+    local pid_file="$1"
+    if [[ -f "$pid_file" ]]; then
+        local pid
+        pid="$(cat "$pid_file" 2>/dev/null || true)"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+pid_of_port() {
+    local port="$1"
+    lsof -t -i":${port}" 2>/dev/null || true
+}
+
+kill_port() {
+    local port="$1"
+    local pids
+    pids="$(pid_of_port "$port")"
+    if [[ -n "$pids" ]]; then
+        echo "  Killing process on port ${port}: ${pids}"
+        kill ${pids} 2>/dev/null || true
+        sleep 1
+        # Force kill if still alive
+        for pid in ${pids}; do
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+        done
+    fi
+}
+
+# ─── Commands ───────────────────────────────────────────────────────────────
+
+# Parse extra server args (anything before --chat or non-recognized flags)
+parse_server_opts() {
+    SERVER_OPTS=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --draft-model)
+                SERVER_OPTS+=("--draft-model" "$2")
+                shift 2
+                ;;
+            --draft-kind)
+                SERVER_OPTS+=("--draft-kind" "$2")
+                shift 2
+                ;;
+            --kv-bits)
+                SERVER_OPTS+=("--kv-bits" "$2")
+                shift 2
+                ;;
+            --kv-quant-scheme)
+                SERVER_OPTS+=("--kv-quant-scheme" "$2")
+                shift 2
+                ;;
+            --chat)
+                shift
+                ;;
+            *)
+                # Unknown arg — could be extra env args, ignore for now
+                shift
+                ;;
+        esac
+    done
+}
+
+cmd_start() {
+    local with_chat=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--chat" ]]; then
+            with_chat=true
+        fi
+    done
+
+    parse_server_opts "$@"
+    ensure_dirs
+
+    # ── Start Server ──
+    if is_running "$SERVER_PID_FILE"; then
+        echo "Server already running (PID: $(cat "$SERVER_PID_FILE"))"
+    else
+        echo "Starting XMLX VLM server..."
+        echo "  Model: ${MODEL}"
+        echo "  Port:  ${PORT}"
+        [[ -n "$API_KEY" ]] && echo "  Auth:  enabled"
+        [[ ${#SERVER_OPTS[@]} -gt 0 ]] && echo "  Extra: ${SERVER_OPTS[*]}"
+        [[ -n "$EXTRA_ARGS" ]] && echo "  Env:   ${EXTRA_ARGS}"
+
+        local server_args=(
+            -m xmlx_vlm.server
+            --model "$MODEL"
+            --port "$PORT"
+        )
+        [[ -n "$API_KEY" ]] && server_args+=(--api-key "$API_KEY")
+        [[ ${#SERVER_OPTS[@]} -gt 0 ]] && server_args+=("${SERVER_OPTS[@]}")
+        [[ -n "$EXTRA_ARGS" ]] && read -ra extra <<< "$EXTRA_ARGS" && server_args+=("${extra[@]}")
+
+        # Clean stale port
+        kill_port "$PORT" 2>/dev/null || true
+
+        nohup "$VENV_PYTHON" "${server_args[@]}" > "$SERVER_LOG" 2>&1 &
+        local server_pid=$!
+        echo "$server_pid" > "$SERVER_PID_FILE"
+
+        # Wait for health check
+        local waited=0
+        while ! curl -sf "http://localhost:${PORT}/health" >/dev/null 2>&1; do
+            sleep 1
+            ((waited++))
+            if [[ $waited -ge 60 ]]; then
+                echo "ERROR: Server failed to start within 60s. Check ${SERVER_LOG}"
+                rm -f "$SERVER_PID_FILE"
+                return 1
+            fi
+            # Check if process died
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+                echo "ERROR: Server process exited unexpectedly. Check ${SERVER_LOG}"
+                rm -f "$SERVER_PID_FILE"
+                return 1
+            fi
+        done
+        echo "Server ready at http://localhost:${PORT} (PID: ${server_pid})"
+    fi
+
+    # ── Start Chat UI ──
+    if [[ "$with_chat" == true ]]; then
+        if is_running "$CHAT_PID_FILE"; then
+            echo "Chat UI already running (PID: $(cat "$CHAT_PID_FILE"))"
+        else
+            echo "Starting Chat UI..."
+            echo "  Port: ${CHAT_PORT}"
+
+            local chat_args=(
+                -m xmlx_vlm.chat_server
+                --server-url "http://localhost:${PORT}"
+                --port "$CHAT_PORT"
+            )
+            [[ -n "$API_KEY" ]] && chat_args+=(--api-key "$API_KEY")
+
+            # Clean stale port
+            kill_port "$CHAT_PORT" 2>/dev/null || true
+
+            nohup "$VENV_PYTHON" "${chat_args[@]}" > "$CHAT_LOG" 2>&1 &
+            local chat_pid=$!
+            echo "$chat_pid" > "$CHAT_PID_FILE"
+
+            # Wait a bit for Gradio to bind
+            sleep 3
+            if ! curl -sf "http://localhost:${CHAT_PORT}" >/dev/null 2>&1; then
+                echo "WARNING: Chat UI may still be loading..."
+            fi
+            echo "Chat UI ready at http://localhost:${CHAT_PORT} (PID: ${chat_pid})"
+        fi
+    fi
+}
+
+cmd_stop() {
+    ensure_dirs
+    local killed=false
+
+    if is_running "$SERVER_PID_FILE"; then
+        local pid
+        pid="$(cat "$SERVER_PID_FILE")"
+        echo "Stopping server (PID: ${pid})..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+        rm -f "$SERVER_PID_FILE"
+        killed=true
+    else
+        # Fallback: kill by port
+        local port_pid
+        port_pid="$(pid_of_port "$PORT")"
+        if [[ -n "$port_pid" ]]; then
+            echo "Stopping server on port ${PORT} (PID: ${port_pid})..."
+            kill "$port_pid" 2>/dev/null || true
+            sleep 1
+            kill -0 "$port_pid" 2>/dev/null && kill -9 "$port_pid" 2>/dev/null || true
+            killed=true
+        fi
+    fi
+
+    if is_running "$CHAT_PID_FILE"; then
+        local pid
+        pid="$(cat "$CHAT_PID_FILE")"
+        echo "Stopping chat UI (PID: ${pid})..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+        rm -f "$CHAT_PID_FILE"
+        killed=true
+    else
+        local chat_pid
+        chat_pid="$(pid_of_port "$CHAT_PORT")"
+        if [[ -n "$chat_pid" ]]; then
+            echo "Stopping chat UI on port ${CHAT_PORT} (PID: ${chat_pid})..."
+            kill "$chat_pid" 2>/dev/null || true
+            sleep 1
+            kill -0 "$chat_pid" 2>/dev/null && kill -9 "$chat_pid" 2>/dev/null || true
+            killed=true
+        fi
+    fi
+
+    if [[ "$killed" == true ]]; then
+        echo "Stopped."
+    else
+        echo "Nothing was running."
+    fi
+}
+
+cmd_restart() {
+    cmd_stop
+    sleep 2
+    cmd_start "$@"
+}
+
+cmd_status() {
+    local server_status="stopped"
+    local server_pid=""
+    local server_model=""
+
+    if is_running "$SERVER_PID_FILE"; then
+        server_pid="$(cat "$SERVER_PID_FILE")"
+        server_status="running"
+        server_model="$(curl -sf "http://localhost:${PORT}/health" 2>/dev/null | grep -o '"loaded_model":"[^"]*"' | cut -d'"' -f4 || echo "unknown")"
+    else
+        local port_pid
+        port_pid="$(pid_of_port "$PORT")"
+        if [[ -n "$port_pid" ]]; then
+            server_pid="${port_pid}"
+            server_status="running (orphan)"
+        fi
+    fi
+
+    local chat_status="stopped"
+    local chat_pid=""
+    if is_running "$CHAT_PID_FILE"; then
+        chat_pid="$(cat "$CHAT_PID_FILE")"
+        chat_status="running"
+    else
+        local port_pid
+        port_pid="$(pid_of_port "$CHAT_PORT")"
+        if [[ -n "$port_pid" ]]; then
+            chat_pid="${port_pid}"
+            chat_status="running (orphan)"
+        fi
+    fi
+
+    echo "╔══════════════════════════════════════════╗"
+    echo "║        XMLX VLM Service Status           ║"
+    echo "╠══════════════════════════════════════════╣"
+    printf "║  Server: %-31s ║\n" "${server_status}"
+    [[ -n "$server_pid" ]] && printf "║  PID:    %-31s ║\n" "${server_pid}"
+    [[ -n "$server_model" ]] && printf "║  Model:  %-31s ║\n" "${server_model}"
+    printf "║  Port:   %-31s ║\n" "${PORT}"
+    printf "║  Chat:   %-31s ║\n" "${chat_status}"
+    [[ -n "$chat_pid" ]] && printf "║  PID:    %-31s ║\n" "${chat_pid}"
+    printf "║  Port:   %-31s ║\n" "${CHAT_PORT}"
+    echo "╚══════════════════════════════════════════╝"
+}
+
+cmd_logs() {
+    local target="${1:-server}"
+    if [[ "$target" == "chat" ]]; then
+        tail -f "$CHAT_LOG"
+    else
+        tail -f "$SERVER_LOG"
+    fi
+}
+
+# ─── Main ───────────────────────────────────────────────────────────────────
+
+cmd="${1:-}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+    start)
+        cmd_start "$@"
+        ;;
+    stop)
+        cmd_stop
+        ;;
+    restart)
+        cmd_restart "$@"
+        ;;
+    status)
+        cmd_status
+        ;;
+    logs)
+        cmd_logs "$@"
+        ;;
+    *)
+        cat <<EOF
+XMLX VLM Service Manager
+
+Usage:
+  $(basename "$0") start [--chat] [SERVER_OPTS]   Start server (optionally with chat UI)
+  $(basename "$0") stop                           Stop server and chat UI
+  $(basename "$0") restart [--chat] [SERVER_OPTS] Restart server
+  $(basename "$0") status                         Show running status
+  $(basename "$0") logs [server|chat]             Tail logs
+
+Server Options (passed directly to xmlx_vlm.server):
+  --draft-model MODEL         Speculative drafter (e.g. z-lab/Qwen3.6-35B-A3B-DFlash)
+  --draft-kind {dflash,mtp}   Drafter family
+  --kv-bits BITS              KV cache quantization bits (e.g. 3.5, 8)
+  --kv-quant-scheme SCHEME    {uniform, turboquant}
+
+Environment:
+  XMLX_VLM_MODEL       Model to load (default: ${MODEL})
+  XMLX_VLM_PORT        Server port (default: ${PORT})
+  XMLX_VLM_CHAT_PORT   Chat UI port (default: ${CHAT_PORT})
+  XMLX_VLM_API_KEY     API key for auth
+  XMLX_VLM_ARGS        Extra server args (e.g. "--enable-thinking --moe-top-k 4")
+
+Examples:
+  ./$(basename "$0") start --chat
+  ./$(basename "$0") start --chat --draft-model z-lab/Qwen3.6-35B-A3B-DFlash --draft-kind dflash
+  XMLX_VLM_API_KEY=mykey ./$(basename "$0") start --chat --kv-bits 3.5 --kv-quant-scheme turboquant
+EOF
+        exit 1
+        ;;
+esac
