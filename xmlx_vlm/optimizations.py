@@ -3,7 +3,7 @@
 Hardware detection and system information for vllm-mlx.
 
 This module provides:
-- Hardware detection for Apple Silicon (M1, M2, M3, M4 series)
+- Hardware detection for Apple Silicon (M1, M2, M3, M4, M5+ series)
 - System memory detection
 - Memory bandwidth benchmarking
 
@@ -123,9 +123,16 @@ def detect_hardware() -> HardwareInfo:
                     gpu_cores=profile["gpu_cores"],
                 )
 
-        # Unknown chip
+        # Unknown / future chip (M5+, etc.) — graceful fallback with
+    # conservative defaults so the engine runs safely until the chip
+    # is added to HARDWARE_PROFILES.
+        logger.warning(
+            "Unknown Apple Silicon chip '%s'. Using conservative fallback. "
+            "Consider opening an issue to add the official spec.",
+            device_name,
+        )
         return HardwareInfo(
-            chip_name="Unknown",
+            chip_name=device_name or "Unknown Apple Silicon",
             total_memory_gb=actual_memory_gb,
             memory_bandwidth_gbs=200,
             gpu_cores=16,

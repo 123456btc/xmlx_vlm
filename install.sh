@@ -3,7 +3,7 @@
 # 
 # Assumptions:
 #   - Fresh Mac or new user (no dev tools installed)
-#   - Apple Silicon (M1/M2/M3/M4)
+#   - Apple Silicon (M1/M2/M3/M4/M5/...)
 #   - Internet connection
 #
 # What this does:
@@ -47,6 +47,7 @@ ARCH="$(uname -m)"
 if [[ "$ARCH" != "arm64" ]]; then
     err "XMLX-VLM requires Apple Silicon (arm64). Detected: $ARCH"
     err "Intel Macs are not supported because MLX requires Apple Silicon GPU."
+    err "M1/M2/M3/M4/M5 and future Apple Silicon are all supported."
     exit 1
 fi
 ok "macOS Apple Silicon detected ($ARCH)"
