@@ -33,6 +33,26 @@ No cloud subscription. No data retention policy. No third-party terms of service
 
 > **Data sovereignty is the architecture. Everything else is built on top of it.**
 
+### 🧬 The AFRE Ecosystem
+
+XMLX-VLM is the **private AI brain** of the [AFRE (AI Factor Research Engine)](https://github.com/123456btc/ai_factor_research_engine_framework) ecosystem — a domain-first, agent-augmented quantitative research platform built on DDD, Hexagonal Architecture, and Clean Architecture.
+
+AFRE researches the **genealogy of market factors**: why they were invented, how they spread, why they decayed, and what broken assumptions can generate modern hypotheses. XMLX-VLM powers AFRE's agent runtime by providing:
+
+| AFRE Capability | What XMLX-VLM Enables Locally |
+|-----------------|------------------------------|
+| **Factor Genealogy Intelligence** | Parse research PDFs and chart images; extract structured factor histories from visual documents |
+| **Inventor Thinking Simulation** | Deep reasoning (`<think>` mode) to simulate a factor creator's constraints, incentives, and knowledge stack |
+| **Hypothesis-Centric Research** | JSON-Schema-constrained output ensures every generated factor variant carries a testable hypothesis and broken-assumption trace |
+| **Reproducible Experimentation** | Tool calling + MCP connects to local backtesters and signal generators; experiments run on your hardware, auditable by design |
+| **Anti-Overfitting Governance** | Structured output enforces walk-forward params, regime splits, and turnover penalties as machine-readable schema |
+| **Knowledge Evolution** | Embedding + Rerank indexes validated findings into a governed, queryable local knowledge base |
+| **Multi-Agent Parallel Research** | Continuous batching + speculative decoding lets multiple AI workers reason independently without latency collapse |
+
+**AFRE is the methodology. XMLX-VLM is the私有化推理层 that makes it possible.**
+
+While AFRE represents XMLX-VLM's flagship implementation in quantitative finance, the same local-privacy architecture serves legal, healthcare, government, and enterprise R&D domains equally.
+
 ---
 
 ## 🎯 Who Is This For?
@@ -125,6 +145,19 @@ Dynamic top-k override lets you trade a fraction of accuracy for latency wins in
 ## 🏗 Architecture Overview
 
 ```
+┌─────────────────────────────────────────────────────────────┐
+│              AFRE (AI Factor Research Engine)                │
+│  ┌──────────────┐ ┌──────────────┐ ┌─────────────────────┐  │
+│  │ Factor       │ │ Inventor     │ │ Hypothesis-Centric  │  │
+│  │ Genealogy    │ │ Thinking     │ │ Research            │  │
+│  │ Intelligence │ │ Simulation   │ │                     │  │
+│  └──────────────┘ └──────────────┘ └─────────────────────┘  │
+│  ┌──────────────┐ ┌──────────────┐ ┌─────────────────────┐  │
+│  │ Anti-Overfit │ │ Knowledge    │ │ Multi-Agent         │  │
+│  │ Governance   │ │ Evolution    │ │ Parallel Research   │  │
+│  └──────────────┘ └──────────────┘ └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
 ┌─────────────────────────────────────────────────────────────┐
 │                  Private AI Agents & Clients                 │
 │  (Cursor, Claude Code, LangChain, PydanticAI, AFRE agents)  │
