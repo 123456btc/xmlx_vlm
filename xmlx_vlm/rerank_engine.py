@@ -217,8 +217,35 @@ class RerankEngine:
             return model
 
         except Exception as e:
-            logger.error(f"Failed to load reranker model: {e}")
-            raise
+            logger.warning(
+                "Safetensors/MLX direct load failed (%s), "
+                "falling back to transformers AutoModelForSequenceClassification.",
+                e,
+            )
+            try:
+                from transformers import AutoModelForSequenceClassification
+
+                pt_model = AutoModelForSequenceClassification.from_pretrained(
+                    model_name
+                )
+                config = pt_model.config.to_dict()
+                num_labels = config.get("num_labels", 1)
+
+                # Convert PyTorch weights to MLX arrays
+                weights = {}
+                for name, param in pt_model.state_dict().items():
+                    weights[name] = mx.array(param.detach().cpu().numpy())
+
+                model = _build_classifier_model(
+                    config.get("model_type", ""), config, weights, num_labels
+                )
+                mx.eval(model.parameters())
+                return model
+            except Exception as e2:
+                logger.error(
+                    "Fallback transformers load also failed: %s", e2
+                )
+                raise
 
     def _ensure_loaded(self) -> None:
         if not self.is_loaded:

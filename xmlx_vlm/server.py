@@ -19,6 +19,18 @@ from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple, Unio
 logger = logging.getLogger("xmlx_vlm.server")
 
 import mlx.core as mx
+
+# Environment toggle for per-request cache clearing. Defaults to False because
+# continuous batching relies on KV-cache/APC reuse and generate.py already
+# clears periodically every 256–512 tokens.
+_CLEAR_CACHE_PER_REQUEST = os.environ.get("XMLX_VLM_CLEAR_CACHE_PER_REQUEST", "false").lower() in ("1", "true", "yes")
+
+
+def _maybe_clear_cache():
+    """Clear MLX cache + GC only when the user explicitly opts in."""
+    if _CLEAR_CACHE_PER_REQUEST:
+        mx.clear_cache()
+        gc.collect()
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -1702,6 +1714,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
 
         chat_messages = []
         images = []
+        audio = []
         instructions = None
         if openai_request.input:
             if isinstance(openai_request.input, str):
@@ -1733,6 +1746,8 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                                     # examples for multiple images (https://platform.openai.com/docs/guides/images?api-mode=responses)
                                     elif item["type"] == "input_image":
                                         images.append(item["image_url"])
+                                    elif item["type"] == "input_audio":
+                                        audio.append(item["input_audio"]["data"])
                                     else:
                                         print(
                                             f"invalid input item type: {item['type']}"
@@ -1854,7 +1869,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                             response_generator.generate,
                             formatted_prompt,
                             images if images else None,
-                            None,  # audio
+                            audio if audio else None,
                             gen_args,
                         )
 
@@ -1890,6 +1905,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                             processor=processor,
                             prompt=formatted_prompt,
                             image=images,
+                            audio=audio,
                             temperature=openai_request.temperature,
                             max_tokens=gen_args.max_tokens,
                             top_p=openai_request.top_p,
@@ -1963,9 +1979,8 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                             token_iter.close()
                         except Exception:
                             pass
-                    mx.clear_cache()
-                    gc.collect()
-                    print("Stream finished, cleared cache.")
+                    _maybe_clear_cache()
+                    print("Stream finished, cache cleared.")
 
             return StreamingResponse(
                 stream_generator(),
@@ -1990,6 +2005,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                         ctx_, ti = response_generator.generate(
                             prompt=formatted_prompt,
                             images=images if images else None,
+                            audio=audio if audio else None,
                             args=gen_args,
                         )
                         text = ""
@@ -2014,6 +2030,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                         processor=processor,
                         prompt=formatted_prompt,
                         image=images,
+                        audio=audio,
                         verbose=logger.isEnabledFor(logging.DEBUG),
                         vision_cache=model_cache.get("vision_cache"),
                         apc_manager=apc_manager,
@@ -2024,8 +2041,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
                     prompt_tokens = result.prompt_tokens
                     output_tokens = result.generation_tokens
 
-                mx.clear_cache()
-                gc.collect()
+                _maybe_clear_cache()
 
                 reasoning, content = _split_thinking(full_text, reasoning_parser)
 
@@ -2079,8 +2095,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
             except Exception as e:
                 print(f"Error during generation: {e}")
                 traceback.print_exc()
-                mx.clear_cache()
-                gc.collect()
+                _maybe_clear_cache()
                 raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
     except HTTPException as http_exc:
@@ -2088,8 +2103,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
     except Exception as e:
         print(f"Unexpected error in /responses endpoint: {e}")
         traceback.print_exc()
-        mx.clear_cache()
-        gc.collect()
+        _maybe_clear_cache()
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {e}"
         )
@@ -2472,9 +2486,8 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                             token_iter.close()
                         except Exception:
                             pass
-                    mx.clear_cache()
-                    gc.collect()
-                    print("Stream finished, cleared cache.")
+                    _maybe_clear_cache()
+                    print("Stream finished, cache cleared.")
 
             return StreamingResponse(
                 stream_generator(),
@@ -2548,8 +2561,7 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                     output_tokens = gen_result.generation_tokens
                     peak_memory = gen_result.peak_memory
 
-                mx.clear_cache()
-                gc.collect()
+                _maybe_clear_cache()
 
                 reasoning, content = _split_thinking(full_text)
 
@@ -2646,8 +2658,7 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
             except Exception as e:
                 print(f"Error during generation: {e}")
                 traceback.print_exc()
-                mx.clear_cache()
-                gc.collect()
+                _maybe_clear_cache()
                 raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
     except HTTPException as http_exc:
@@ -2657,8 +2668,7 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
         # Catch unexpected errors
         print(f"Unexpected error in /generate endpoint: {e}")
         traceback.print_exc()
-        mx.clear_cache()
-        gc.collect()
+        _maybe_clear_cache()
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {e}"
         )
@@ -2689,28 +2699,138 @@ async def anthropic_messages_endpoint(request: AnthropicMessageRequest, http_req
         stream=request.stream or False,
     )
 
-    # Reuse existing chat completions logic
-    result = await chat_completions_endpoint(chat_request, http_request)
+    # Reuse existing chat completions logic for non-streaming
+    if not chat_request.stream:
+        result = await chat_completions_endpoint(chat_request, http_request)
+        chat_response = result
+        content_text = chat_response.choices[0].message.content or ""
+        return AnthropicMessageResponse(
+            id=f"msg_{uuid.uuid4().hex[:24]}",
+            type="message",
+            role="assistant",
+            model=request.model,
+            content=[AnthropicMessageContent(type="text", text=content_text)],
+            stop_reason="end_turn",
+            usage=AnthropicUsage(
+                input_tokens=chat_response.usage.prompt_tokens,
+                output_tokens=chat_response.usage.completion_tokens,
+            ),
+        )
 
-    # If streaming, pass through as-is (OpenAI SSE format)
-    if isinstance(result, StreamingResponse):
-        return result
+    # ── Streaming path: emit native Anthropic SSE ──────────────────────────
+    model, processor, config = get_cached_model(request.model)
+    gen_args = _build_gen_args(
+        chat_request, processor, tenant_id=_read_tenant_id(http_request)
+    )
 
-    # Convert ChatResponse to Anthropic format
-    chat_response = result
-    content_text = chat_response.choices[0].message.content or ""
+    simple_messages = [{"role": m.role, "content": m.content} for m in chat_messages]
+    formatted_prompt = apply_chat_template(
+        processor,
+        config,
+        simple_messages,
+        num_images=0,
+        num_audios=0,
+        **gen_args.to_template_kwargs(),
+    )
 
-    return AnthropicMessageResponse(
-        id=f"msg_{uuid.uuid4().hex[:24]}",
-        type="message",
-        role="assistant",
-        model=request.model,
-        content=[AnthropicMessageContent(type="text", text=content_text)],
-        stop_reason="end_turn",
-        usage=AnthropicUsage(
-            input_tokens=chat_response.usage.prompt_tokens,
-            output_tokens=chat_response.usage.completion_tokens,
-        ),
+    # Best-effort input token count for message_start usage
+    try:
+        tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
+        input_tokens = len(tokenizer.encode(formatted_prompt))
+    except Exception:
+        input_tokens = 0
+
+    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+    model_name = request.model
+
+    async def anthropic_stream_generator():
+        output_tokens = 0
+        full_text = ""
+        token_iter = None
+
+        try:
+            # event: message_start
+            yield f"event: message_start\ndata: {json.dumps({'type':'message_start','message':{'id':msg_id,'type':'message','role':'assistant','model':model_name,'content':[],'stop_reason':None,'stop_sequence':None,'usage':{'input_tokens':input_tokens,'output_tokens':0}}})}\n\n"
+
+            # event: content_block_start
+            yield f"event: content_block_start\ndata: {json.dumps({'type':'content_block_start','index':0,'content_block':{'type':'text','text':''}})}\n\n"
+
+            # event: ping
+            yield f"event: ping\ndata: {json.dumps({'type':'ping'})}\n\n"
+
+            if response_generator is not None:
+                ctx, token_iter = await asyncio.to_thread(
+                    response_generator.generate,
+                    formatted_prompt,
+                    None,
+                    None,
+                    gen_args,
+                )
+
+                def _next_token():
+                    try:
+                        return next(token_iter)
+                    except StopIteration:
+                        return None
+
+                while True:
+                    token = await asyncio.to_thread(_next_token)
+                    if token is None:
+                        break
+                    output_tokens += 1
+                    full_text += token.text
+                    yield f"event: content_block_delta\ndata: {json.dumps({'type':'content_block_delta','index':0,'delta':{'type':'text_delta','text':token.text}})}\n\n"
+                    if token.finish_reason:
+                        break
+            else:
+                token_iterator = stream_generate(
+                    model=model,
+                    processor=processor,
+                    prompt=formatted_prompt,
+                    image=None,
+                    audio=None,
+                    vision_cache=model_cache.get("vision_cache"),
+                    apc_manager=apc_manager,
+                    **gen_args.to_generate_kwargs(),
+                )
+                for chunk in token_iterator:
+                    if chunk is None or not hasattr(chunk, "text"):
+                        continue
+                    output_tokens += 1
+                    full_text += chunk.text
+                    yield f"event: content_block_delta\ndata: {json.dumps({'type':'content_block_delta','index':0,'delta':{'type':'text_delta','text':chunk.text}})}\n\n"
+                    if getattr(chunk, "finish_reason", None):
+                        break
+
+            # event: content_block_stop
+            yield f"event: content_block_stop\ndata: {json.dumps({'type':'content_block_stop','index':0})}\n\n"
+
+            # event: message_delta
+            yield f"event: message_delta\ndata: {json.dumps({'type':'message_delta','delta':{'stop_reason':'end_turn','stop_sequence':None},'usage':{'output_tokens':output_tokens}})}\n\n"
+
+            # event: message_stop
+            yield f"event: message_stop\ndata: {json.dumps({'type':'message_stop'})}\n\n"
+
+        except Exception as e:
+            logger.exception("Error in Anthropic streaming")
+            yield f"event: error\ndata: {json.dumps({'type':'error','error':{'type':'overloaded_error','message':str(e)}})}\n\n"
+
+        finally:
+            if token_iter is not None:
+                try:
+                    token_iter.close()
+                except Exception:
+                    pass
+            _maybe_clear_cache()
+
+    return StreamingResponse(
+        anthropic_stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
