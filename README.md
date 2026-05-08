@@ -267,6 +267,91 @@ curl http://localhost:8080/v1/chat/completions \
 
 ---
 
+## 🤖 Agent Client Integration
+
+XMLX-VLM is designed to be the **local backend for coding agents and AI assistants**. Because agent clients resend the full conversation history every turn, enabling APC disk persistence (`APC_DISK_PATH`) is strongly recommended — it eliminates repeated prefill overhead after the first expensive warm-up.
+
+### Claude Code (Anthropic-compatible)
+
+Create `~/.local/bin/claude-xmlx`:
+
+```bash
+#!/bin/sh
+unset ANTHROPIC_API_KEY
+
+export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
+export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
+export ANTHROPIC_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+
+export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="XMLX-VLM Local Qwen3.6"
+export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="Local MLX inference via xmlx_vlm"
+
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
+export CLAUDE_STREAM_IDLE_TIMEOUT_MS=600000
+
+exec "$HOME/.local/bin/claude" "$@"
+```
+
+Start the server with disk KV cache:
+
+```bash
+APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start --no-chat
+```
+
+### Cline / Continue.dev (OpenAI-compatible)
+
+In your VS Code settings or `~/.continue/config.json`:
+
+```json
+{
+  "models": [
+    {
+      "title": "XMLX-VLM Local",
+      "provider": "openai",
+      "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+      "apiBase": "http://localhost:8080/v1",
+      "apiKey": "x123456"
+    }
+  ]
+}
+```
+
+### Aider (OpenAI-compatible)
+
+```bash
+export OPENAI_API_BASE=http://localhost:8080/v1
+export OPENAI_API_KEY=x123456
+aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
+```
+
+### Cursor (OpenAI-compatible)
+
+In Cursor Settings → Models → Add Model:
+- **Base URL**: `http://localhost:8080/v1`
+- **API Key**: `x123456`
+- **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
+
+### Recommended Agent Server Flags
+
+```bash
+# Full agent stack: disk APC + tool acceleration + long context
+APC_ENABLED=1 \
+APC_DISK_PATH=/tmp/xmlx-apc \
+XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
+./service.sh start --no-chat --ctx 100000
+```
+
+> **Tip**: Agent clients often send 10k–30k tokens for the initial system prompt. With `APC_DISK_PATH`, this prefix is written to SSD during the first prefill and restored instantly on subsequent sessions — even after a server restart.
+
+---
+
 ## 🛠 Operations & Observability
 
 ```bash

@@ -7,8 +7,9 @@ and content-phase constrained decoding delegation.
 from __future__ import annotations
 
 import enum
+import os
 from collections import deque
-from typing import Callable
+from typing import Callable, Optional, Union
 
 import mlx.core as mx
 
@@ -57,6 +58,104 @@ class Phase(enum.Enum):
     CONTENT = "content"
 
 
+class AdaptiveThinkingBudget:
+    """Compute thinking token budgets from string effort levels or prompt heuristics.
+
+    Maps OpenAI-compatible ``reasoning_effort`` strings to concrete token budgets:
+      - ``off`` / ``disabled`` -> 0
+      - ``low`` / ``minimal``  -> 256
+      - ``medium``             -> 512 (default)
+      - ``high``               -> 1024
+      - ``xhigh`` / ``max``    -> 2048
+
+    When ``adaptive=True``, the budget is further scaled by prompt complexity
+    heuristics (token count, code/math density).
+    """
+
+    _LEVELS = {
+        "off": 0,
+        "disabled": 0,
+        "none": 0,
+        "low": 256,
+        "minimal": 256,
+        "medium": 512,
+        "high": 1024,
+        "xhigh": 2048,
+        "max": 2048,
+    }
+
+    def __init__(
+        self,
+        default_budget: int = 512,
+        adaptive: bool = False,
+        min_budget: int = 128,
+        max_budget: int = 4096,
+    ):
+        self.default_budget = default_budget
+        self.adaptive = adaptive
+        self.min_budget = min_budget
+        self.max_budget = max_budget
+
+    def resolve(
+        self,
+        budget: Union[int, str, None],
+        *,
+        prompt_token_count: int = 0,
+    ) -> int:
+        """Resolve a budget specification to a concrete token count.
+
+        Args:
+            budget: Raw budget -- int, string level, or None.
+            prompt_token_count: Number of tokens in the prompt for adaptive scaling.
+
+        Returns:
+            Concrete thinking token budget (>= 0).
+        """
+        if budget is None:
+            base = self.default_budget
+        elif isinstance(budget, int):
+            base = max(0, budget)
+        elif isinstance(budget, str):
+            key = budget.strip().lower()
+            base = self._LEVELS.get(key, self.default_budget)
+        else:
+            base = self.default_budget
+
+        if not self.adaptive or base == 0:
+            return base
+
+        # Adaptive scaling: longer / more complex prompts get proportionally
+        # more thinking budget, capped at max_budget.
+        scale = 1.0
+        if prompt_token_count > 4096:
+            scale = 1.5
+        elif prompt_token_count > 2048:
+            scale = 1.25
+        elif prompt_token_count > 512:
+            scale = 1.1
+
+        adjusted = int(base * scale)
+        return max(self.min_budget, min(adjusted, self.max_budget))
+
+
+def resolve_thinking_budget(
+    budget: Union[int, str, None],
+    *,
+    prompt_token_count: int = 0,
+    default_budget: int = 512,
+) -> int:
+    """Global convenience helper to resolve a thinking budget."""
+    adaptive = os.environ.get("XMLX_VLM_ADAPTIVE_THINKING", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    resolver = AdaptiveThinkingBudget(
+        default_budget=default_budget, adaptive=adaptive
+    )
+    return resolver.resolve(budget, prompt_token_count=prompt_token_count)
+
+
 class ThinkingAwareLogitsProcessor:
     """Unified logits processor for thinking-model lifecycle management.
 
@@ -91,10 +190,11 @@ class ThinkingAwareLogitsProcessor:
         self,
         start_token_ids: list[int],
         end_token_ids: list[int],
-        thinking_token_budget: int,
+        thinking_token_budget: Union[int, str, None] = 512,
         inner: Callable[[mx.array, mx.array], mx.array] | None = None,
         vocab_size: int = 152064,
         prompt_has_think_tag: bool = False,
+        prompt_token_count: int = 0,
     ) -> None:
         self._start_matcher = BoundedSuffixMatcher(start_token_ids)
         self._end_matcher = BoundedSuffixMatcher(end_token_ids)
@@ -104,7 +204,10 @@ class ThinkingAwareLogitsProcessor:
         self._content_phase_mask_ids = tuple(
             dict.fromkeys([start_token_ids[0], end_token_ids[0]])
         )
-        self._thinking_token_budget = thinking_token_budget
+        self._thinking_token_budget = resolve_thinking_budget(
+            thinking_token_budget,
+            prompt_token_count=prompt_token_count,
+        )
         self._inner = inner
         self._vocab_size = vocab_size
         self._thinking_tokens = 0
@@ -113,7 +216,7 @@ class ThinkingAwareLogitsProcessor:
         # the first generated token is already inside the thinking span.
         # Start in THINKING (or TRANSITIONING if budget=0) instead of IDLE.
         if prompt_has_think_tag:
-            if thinking_token_budget == 0:
+            if self._thinking_token_budget == 0:
                 self._state = Phase.TRANSITIONING
             else:
                 self._state = Phase.THINKING

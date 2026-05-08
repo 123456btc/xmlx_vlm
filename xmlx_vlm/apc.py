@@ -3294,8 +3294,36 @@ class APCManager:
             self._exact_cache.clear()
             self.stats = APCStats()
 
+    def flush_to_disk(self) -> int:
+        """Write all unreferenced in-memory blocks to the disk tier.
+
+        This is useful for agent workloads where the server may restart
+        between turns: flushing after a generation ensures the prefix
+        cache survives process restarts without waiting for LRU eviction.
+
+        Returns the number of blocks scheduled for disk write.
+        """
+        if self.disk is None:
+            return 0
+        with self.lock:
+            blocks_to_flush: List[APCBlock] = []
+            for b in self.pool:
+                if (
+                    b.block_hash is not None
+                    and b.ref_cnt == 0
+                    and b.keys is not None
+                    and b.values is not None
+                    and not self.disk.has(b.block_hash)
+                ):
+                    blocks_to_flush.append(b)
+            if blocks_to_flush:
+                self.disk.save_batch(blocks_to_flush)
+                return len(blocks_to_flush)
+            return 0
+
     def close(self) -> None:
-        """Best-effort shutdown: close the disk writer thread."""
+        """Best-effort shutdown: flush blocks then close the disk writer thread."""
+        self.flush_to_disk()
         if self.disk is not None:
             self.disk.close()
 

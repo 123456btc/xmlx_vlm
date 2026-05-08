@@ -269,6 +269,91 @@ curl http://localhost:8080/v1/chat/completions \
 
 ---
 
+## 🤖 Agent 客户端接入
+
+XMLX-VLM 专为**编程 Agent 和 AI 助手的本地后端**而设计。由于 Agent 客户端每轮都会重发完整对话历史，强烈建议启用 APC 磁盘持久化（`APC_DISK_PATH`）——它能在首次昂贵的预填充后消除重复预填充开销。
+
+### Claude Code（Anthropic 兼容）
+
+创建 `~/.local/bin/claude-xmlx`：
+
+```bash
+#!/bin/sh
+unset ANTHROPIC_API_KEY
+
+export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
+export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
+export ANTHROPIC_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+
+export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="XMLX-VLM Local Qwen3.6"
+export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="本地 MLX 推理 via xmlx_vlm"
+
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
+export CLAUDE_STREAM_IDLE_TIMEOUT_MS=600000
+
+exec "$HOME/.local/bin/claude" "$@"
+```
+
+启动带磁盘 KV 缓存的服务：
+
+```bash
+APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start --no-chat
+```
+
+### Cline / Continue.dev（OpenAI 兼容）
+
+在 VS Code 设置或 `~/.continue/config.json` 中：
+
+```json
+{
+  "models": [
+    {
+      "title": "XMLX-VLM Local",
+      "provider": "openai",
+      "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+      "apiBase": "http://localhost:8080/v1",
+      "apiKey": "x123456"
+    }
+  ]
+}
+```
+
+### Aider（OpenAI 兼容）
+
+```bash
+export OPENAI_API_BASE=http://localhost:8080/v1
+export OPENAI_API_KEY=x123456
+aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
+```
+
+### Cursor（OpenAI 兼容）
+
+在 Cursor 设置 → Models → Add Model：
+- **Base URL**: `http://localhost:8080/v1`
+- **API Key**: `x123456`
+- **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
+
+### 推荐的 Agent 服务端启动参数
+
+```bash
+# 完整 Agent 栈：磁盘 APC + 工具加速 + 长上下文
+APC_ENABLED=1 \
+APC_DISK_PATH=/tmp/xmlx-apc \
+XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
+./service.sh start --no-chat --ctx 100000
+```
+
+> **提示**：Agent 客户端的初始系统提示通常在 10k–30k token 之间。启用 `APC_DISK_PATH` 后，该前缀在首次预填充时写入 SSD，后续会话（即使服务器重启后）也能瞬间恢复。
+
+---
+
 ## 🛠 运维与可观测性
 
 ```bash

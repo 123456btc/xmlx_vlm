@@ -220,7 +220,7 @@ class GenerationArguments:
     repetition_penalty: Optional[float] = None
     logit_bias: Optional[dict] = None
     enable_thinking: bool = DEFAULT_ENABLE_THINKING
-    thinking_budget: Optional[int] = None
+    thinking_budget: Optional[Union[int, str]] = None
     thinking_start_token: Optional[str] = None
     thinking_end_token: Optional[str] = None
     logits_processors: Optional[List[Callable[[mx.array, mx.array], mx.array]]] = None
@@ -1068,6 +1068,11 @@ def _build_gen_args(
         "enable_tool_logits_bias",
         get_server_enable_tool_logits_bias(),
     )
+    # reasoning_effort maps to thinking_budget when the latter is unset
+    thinking_budget = getattr(request, "thinking_budget", None)
+    reasoning_effort = getattr(request, "reasoning_effort", None)
+    if thinking_budget is None and reasoning_effort is not None:
+        thinking_budget = reasoning_effort
     args = GenerationArguments(
         max_tokens=max_tokens,
         temperature=getattr(request, "temperature", DEFAULT_TEMPERATURE),
@@ -1077,7 +1082,7 @@ def _build_gen_args(
         repetition_penalty=getattr(request, "repetition_penalty", None),
         logit_bias=logit_bias,
         enable_thinking=enable_thinking,
-        thinking_budget=getattr(request, "thinking_budget", None),
+        thinking_budget=thinking_budget,
         thinking_start_token=getattr(request, "thinking_start_token", None),
         thinking_end_token=getattr(request, "thinking_end_token", None),
         tenant_id=tenant_id,
@@ -1159,7 +1164,13 @@ def _build_structured_logits_processors(request, processor, gen_args):
     # If thinking is enabled alongside structured output, wrap the schema
     # processor with a thinking-aware lifecycle manager so the model can
     # reason freely before the schema constraint kicks in.
-    if gen_args.enable_thinking or (gen_args.thinking_budget is not None and gen_args.thinking_budget > 0):
+    _budget_val = gen_args.thinking_budget
+    _has_budget = False
+    if isinstance(_budget_val, int):
+        _has_budget = _budget_val > 0
+    elif isinstance(_budget_val, str):
+        _has_budget = _budget_val.lower() not in ("off", "disabled", "none", "")
+    if gen_args.enable_thinking or _has_budget:
         start_token = gen_args.thinking_start_token or DEFAULT_THINKING_START_TOKEN
         end_token = gen_args.thinking_end_token or DEFAULT_THINKING_END_TOKEN
         try:
@@ -1176,6 +1187,25 @@ def _build_structured_logits_processors(request, processor, gen_args):
         # the thinking span.
         prompt_has_think_tag = bool(gen_args.enable_thinking)
 
+        # Best-effort prompt token count for adaptive budget scaling
+        prompt_token_count = 0
+        try:
+            messages = getattr(request, "messages", None) or getattr(request, "input", None)
+            if messages is not None:
+                if isinstance(messages, str):
+                    prompt_token_count = len(tokenizer.encode(messages))
+                elif isinstance(messages, list):
+                    texts = []
+                    for m in messages:
+                        content = getattr(m, "content", None)
+                        if isinstance(content, str):
+                            texts.append(content)
+                        elif isinstance(content, list):
+                            texts.append("".join(str(c) for c in content))
+                    prompt_token_count = len(tokenizer.encode("\n".join(texts)))
+        except Exception:
+            pass
+
         thinking_processor = ThinkingAwareLogitsProcessor(
             start_token_ids=list(start_token_ids),
             end_token_ids=list(end_token_ids),
@@ -1183,6 +1213,7 @@ def _build_structured_logits_processors(request, processor, gen_args):
             inner=inner,
             vocab_size=getattr(tokenizer, "vocab_size", 152064),
             prompt_has_think_tag=prompt_has_think_tag,
+            prompt_token_count=prompt_token_count,
         )
         return [thinking_processor]
 
@@ -1349,6 +1380,15 @@ async def lifespan(app):
         except Exception as e:
             logger.warning("Failed to connect external MCP servers: %s", e)
     yield
+    # Flush APC blocks to disk so prefix caches survive server restarts
+    global apc_manager
+    if apc_manager is not None:
+        try:
+            n_flushed = apc_manager.flush_to_disk()
+            if n_flushed:
+                logger.info("APC: flushed %d blocks to disk before shutdown", n_flushed)
+        except Exception as e:
+            logger.warning("APC flush on shutdown failed: %s", e)
     # Cleanup MCP connections on shutdown
     try:
         mcp_manager = get_manager()
@@ -1665,7 +1705,16 @@ class OpenAIRequest(FlexibleBaseModel):
             "server default set by --enable-thinking is used."
         ),
     )
-    thinking_budget: Optional[int] = Field(None, description="Max thinking tokens.")
+    thinking_budget: Optional[Union[int, str]] = Field(
+        None, description="Max thinking tokens or effort level (low/medium/high/xhigh)."
+    )
+    reasoning_effort: Optional[str] = Field(
+        None,
+        description=(
+            "OpenAI-compatible reasoning effort (low/medium/high). "
+            "Maps to thinking_budget when thinking_budget is not set."
+        ),
+    )
     thinking_start_token: Optional[str] = Field(
         None, description="Thinking start token."
     )
@@ -1868,7 +1917,16 @@ class VLMRequest(FlexibleBaseModel):
             "server default set by --enable-thinking is used."
         ),
     )
-    thinking_budget: Optional[int] = Field(None, description="Max thinking tokens.")
+    thinking_budget: Optional[Union[int, str]] = Field(
+        None, description="Max thinking tokens or effort level (low/medium/high/xhigh)."
+    )
+    reasoning_effort: Optional[str] = Field(
+        None,
+        description=(
+            "OpenAI-compatible reasoning effort (low/medium/high). "
+            "Maps to thinking_budget when thinking_budget is not set."
+        ),
+    )
     thinking_start_token: Optional[str] = Field(
         None, description="Thinking start token."
     )
