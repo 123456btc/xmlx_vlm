@@ -15,11 +15,11 @@
 
 ## 🚀 Why XMLX-VLM?
 
-**XMLX-VLM** is a hard-fork of the popular `mlx-vlm` project, rebuilt from the ground up for teams that need **more than just inference** — they need a **complete, deployable, observable Vision-Language stack** on Apple Silicon.
+**XMLX-VLM** is an opinionated hard-fork built for teams that need **more than just inference** on Apple Silicon — they need a **complete, deployable, observable Vision-Language stack**.
 
-While the upstream project focuses on research-friendly notebooks, XMLX-VLM adds the missing layers that turn a model loader into a **production system**: a scalable API server, speculative decoding, structured output, tool calling, embedding & reranking engines, and a built-in operations dashboard.
+We stand on the shoulders of two excellent open-source projects — [**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) for the core VLM loader and [**vllm-mlx**](https://github.com/vllm-project/vllm) community patterns for serving infrastructure — then added the missing layers that turn a model loader into a **production system**: a scalable API server, speculative decoding, structured output, tool calling, embedding & reranking engines, automatic prefix caching with SSD persistence, and a built-in operations suite.
 
-> If you run VLMs on Mac Studio, Mac Pro, or fleet of M4 Max machines — this is the stack you have been waiting for.
+> If you run VLMs on Mac Studio, Mac Pro, or a fleet of M4 Max machines — this is the stack that closes the gap between "it works on my laptop" and "it runs in production."
 
 ---
 
@@ -39,40 +39,39 @@ While the upstream project focuses on research-friendly notebooks, XMLX-VLM adds
 
 ## ⚡ Technical Advantages
 
-### 1. Speculative Decoding at Scale
+### 1. Thinking-Aware Constrained Generation
+Most structured-output engines break when a model enters a chain-of-thought "thinking" phase. XMLX-VLM ships a **`ThinkingAwareLogitsProcessor`** that maintains JSON-Schema and regex constraints **even while the model thinks out loud**. No more corrupted schemas after a `<think>` block.
+
+### 2. Automatic Prefix Caching with SSD Persistence (APC)
+We ported the block-level prefix-caching concept from vLLM down to the MLX runtime, then added a **disk tier**: when `APC_DISK_PATH` is set, fully-computed KV blocks are written to sharded SSD files and can survive process restarts. Identical prompts warm-start in milliseconds instead of seconds.
+
+### 3. Speculative Decoding at Scale
 XMLX-VLM ships with **two speculative drafter families**:
 - **DFlash** — ultra-light draft models that predict 2–3 tokens ahead with near-zero overhead.
 - **MTP** (Multi-Token Prediction) — parallel draft paths for high-entropy prompts.
 
-Combined with adaptive acceptance thresholds, this delivers **1.5×–2.3× throughput gains** on long-form generation without quality loss.
+Combined with adaptive acceptance thresholds, speculative paths can significantly cut time-to-first-token on long-form generation.
 
-### 2. KV-Cache Quantization
+### 4. KV-Cache Quantization
 Memory is the bottleneck on unified-memory architectures. We support:
 - **Uniform quantization** (4-bit, 3.5-bit, 8-bit)
-- **TurboQuant** — our adaptive scheme that preserves attention precision where it matters and compresses where it does not.
+- **TurboQuant** — an adaptive scheme that preserves attention precision where it matters and compresses where it does not.
 
-Run 70B-class vision models on a 128 GB Mac Studio with headroom to spare.
+### 5. MoE Top-K Override
+Mixture-of-Experts models are the new standard, but default routing wastes cycles. XMLX-VLM exposes **dynamic top-k override** so you can trade a fraction of accuracy for latency wins in latency-sensitive workloads.
 
-### 3. MoE Top-K Override
-Mixture-of-Experts models are the new standard, but default routing wastes cycles. XMLX-VLM exposes **dynamic top-k override** so you can trade a fraction of accuracy for massive latency wins in latency-sensitive workloads.
+### 6. Multi-Format Reasoning Parsers
+Out-of-the-box parsers for **Qwen3, DeepSeek-R1, Gemma4, GLM4, GPT-OSS, and Harmony** reasoning formats. The server automatically strips internal monologue before returning structured JSON, while still exposing the raw chain-of-thought when you need it.
 
-### 4. Thinking & Reasoning Mode
-Native support for **chain-of-thought reasoning** with configurable thinking budgets, start/end token control, and a `ThinkingAwareLogitsProcessor` that keeps structured generation coherent even when the model "thinks out loud."
-
-### 5. Structured Output & Constrained Generation
-- JSON-Schema-validated responses via `build_json_schema_logits_processor`
-- Regex-constrained token masks
-- Seamless integration with the chat template so constraints survive multi-turn context
-
-### 6. Tool Calling & MCP (Model Context Protocol)
+### 7. Tool Calling & MCP (Model Context Protocol)
 - Automatic tool-parser inference from the model processor
 - Pluggable tool modules
-- Built-in **MCP Manager** for connecting to external data sources, IDEs, and agent frameworks
+- Built-in **MCP Manager** for connecting to external data sources, IDEs, and agent frameworks via stdio or SSE
 
-### 7. Embedding & Rerank Engines
+### 8. Embedding & Rerank Engines
 A single process serves **vision-language chat**, **text embeddings**, and **reranking**. No need to run a separate embedding micro-service — reduce network hops and context-switching overhead.
 
-### 8. Apple-Silicon Native Optimization
+### 9. Apple-Silicon Native Optimization
 - Flash Attention via `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion for vision encoders
 - Hardware-aware memory budgeting (M1 → M4 Ultra profiles baked in)
@@ -161,19 +160,6 @@ curl http://localhost:8080/v1/chat/completions \
 
 ---
 
-## 📊 Performance Snapshot
-
-| Hardware | Model | Decoding | KV Bits | Tok/sec | Memory |
-|----------|-------|----------|---------|---------|--------|
-| Mac Studio M2 Ultra | Qwen3.6-72B | Standard | 8-bit | 28 t/s | 78 GB |
-| Mac Studio M2 Ultra | Qwen3.6-72B | DFlash Draft | 3.5-bit | 52 t/s | 44 GB |
-| MacBook Pro M4 Max | Qwen3.6-35B-A3B | MTP Draft | 4-bit | 89 t/s | 22 GB |
-| Mac mini M4 Pro | LLaVA-1.6-34B | Standard | 4-bit | 34 t/s | 19 GB |
-
-*Benchmarks measured with batch=1, temp=0.6, prefill=1024 tokens. Your mileage may vary based on prompt entropy.*
-
----
-
 ## 🛠 Operations & Observability
 
 ```bash
@@ -207,6 +193,21 @@ curl http://localhost:8080/v1/chat/completions \
 
 ---
 
+## 🏛 Acknowledgments & Lineage
+
+XMLX-VLM is a **hard-fork** that consciously builds on top of several outstanding open-source projects:
+
+| Project | What We Borrowed | What We Added |
+|---------|-----------------|---------------|
+| [**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) | Core VLM model loading, weight conversion, and MLX generation primitives | Production server, speculative decoding, structured output, tool calling, MCP, embedding/rerank engines |
+| [**vllm-mlx**](https://github.com/vllm-project/vllm) (community patterns) | Metrics design, model registry patterns, hardware detection concepts | SSD-persistent APC cache, Apple-Silicon-specific memory budgeting, unified CLI |
+| [**llama.cpp**](https://github.com/ggerganov/llama.cpp) | Mixed quantization predicates (Q4_K_M-style strategies) | Integration into the MLX conversion pipeline |
+| [**Hugging Face Transformers**](https://github.com/huggingface/transformers) | Tokenizer utilities, sampling logic, AutoModel loading | MLX-native weight conversion, batch streaming, thinking-aware processors |
+
+We are deeply grateful to the authors and communities behind these projects. XMLX-VLM exists because they laid the groundwork.
+
+---
+
 ## 🤝 Community & Roadmap
 
 - [x] OpenAI-compatible REST API
@@ -214,9 +215,11 @@ curl http://localhost:8080/v1/chat/completions \
 - [x] KV-cache quantization
 - [x] Tool calling & MCP
 - [x] Embedding & Rerank engines
+- [x] Automatic Prefix Caching with SSD persistence
+- [x] Thinking-aware structured generation
 - [ ] LoRA serving (hot-swap adapters)
 - [ ] Multi-GPU pipeline parallelism
-- [ ] vLLM-style PagedAttention on MLX
+- [ ] Community benchmark suite (contributions welcome!)
 
 **License:** MIT  
 **Origin:** Hard-fork from [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) — rebuilt for production workloads.
