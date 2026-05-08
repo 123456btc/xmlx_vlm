@@ -11,6 +11,10 @@
   <a href="#"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python"></a>
 </p>
 
+<p align="center">
+  <strong>🇺🇸 English</strong> | <a href="README.zh.md">🇨🇳 中文</a>
+</p>
+
 ---
 
 ## 🚀 Why XMLX-VLM?
@@ -27,8 +31,8 @@ We stand on the shoulders of two excellent open-source projects — [**Blaizzy/m
 
 | Capability | What You Get |
 |------------|-------------|
-| **OpenAI-Compatible Server** | Drop-in replacement for OpenAI vision endpoints. Supports `/v1/chat/completions`, `/v1/embeddings`, `/v1/rerank`, and streaming SSE out of the box. |
-| **Anthropic / Claude Compatible** | Native `/v1/messages` endpoint with tool-use and streaming support. Swap Claude SDK base URL and it just works. |
+| **OpenAI + Claude Dual-Protocol Server** | One server speaks both protocols. OpenAI endpoints (`/v1/chat/completions`, `/v1/embeddings`, `/v1/rerank`) and Anthropic endpoints (`/v1/messages`) with streaming SSE, tool-use, and reasoning blocks—all out of the box. |
+| **Drop-in SDK Replacement** | Point OpenAI SDK or Claude SDK at `http://localhost:8080`—zero code changes. Cursor, Claude Code, LangChain, PydanticAI all work natively. |
 | **Gradio Chat UI** | One-command launch (`--chat`) gives you a polished web interface for demos, QA, and internal tooling. |
 | **Service Manager** | `service.sh` handles daemonization, health checks, log rotation, port management, and zero-downtime restarts. |
 | **API Key Auth** | Rotate keys via environment variables. Enterprise-grade access control without a proxy. |
@@ -264,7 +268,7 @@ We are deeply grateful to the authors and communities behind these projects. XML
 
 ## 🤝 Community & Roadmap
 
-- [x] OpenAI-compatible REST API
+- [x] Dual-protocol REST API (OpenAI + Anthropic/Claude)
 - [x] Speculative decoding (DFlash + MTP)
 - [x] KV-cache quantization
 - [x] Tool calling & MCP
