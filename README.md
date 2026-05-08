@@ -28,6 +28,7 @@ We stand on the shoulders of two excellent open-source projects — [**Blaizzy/m
 | Capability | What You Get |
 |------------|-------------|
 | **OpenAI-Compatible Server** | Drop-in replacement for OpenAI vision endpoints. Supports `/v1/chat/completions`, `/v1/embeddings`, `/v1/rerank`, and streaming SSE out of the box. |
+| **Anthropic / Claude Compatible** | Native `/v1/messages` endpoint with tool-use and streaming support. Swap Claude SDK base URL and it just works. |
 | **Gradio Chat UI** | One-command launch (`--chat`) gives you a polished web interface for demos, QA, and internal tooling. |
 | **Service Manager** | `service.sh` handles daemonization, health checks, log rotation, port management, and zero-downtime restarts. |
 | **API Key Auth** | Rotate keys via environment variables. Enterprise-grade access control without a proxy. |
@@ -201,6 +202,7 @@ XMLX-VLM is a **hard-fork** that consciously builds on top of several outstandin
 |---------|-----------------|---------------|
 | [**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) | Core VLM model loading, weight conversion, and MLX generation primitives | Production server, speculative decoding, structured output, tool calling, MCP, embedding/rerank engines |
 | [**vllm-mlx**](https://github.com/vllm-project/vllm) (community patterns) | Metrics design, model registry patterns, hardware detection concepts | SSD-persistent APC cache, Apple-Silicon-specific memory budgeting, unified CLI |
+| **Anthropic SDK** | Message format and tool-use schema | First-class `/v1/messages` endpoint with streaming, tool results, and thinking blocks |
 | [**llama.cpp**](https://github.com/ggerganov/llama.cpp) | Mixed quantization predicates (Q4_K_M-style strategies) | Integration into the MLX conversion pipeline |
 | [**Hugging Face Transformers**](https://github.com/huggingface/transformers) | Tokenizer utilities, sampling logic, AutoModel loading | MLX-native weight conversion, batch streaming, thinking-aware processors |
 
