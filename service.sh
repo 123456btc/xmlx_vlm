@@ -220,6 +220,7 @@ cmd_stop() {
     ensure_dirs
     local killed=false
 
+    # ── Stop Server ──
     if is_running "$SERVER_PID_FILE"; then
         local pid
         pid="$(cat "$SERVER_PID_FILE")"
@@ -229,19 +230,19 @@ cmd_stop() {
         kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
         rm -f "$SERVER_PID_FILE"
         killed=true
-    else
-        # Fallback: kill by port
-        local port_pid
-        port_pid="$(pid_of_port "$PORT")"
-        if [[ -n "$port_pid" ]]; then
-            echo "Stopping server on port ${PORT} (PID: ${port_pid})..."
-            kill "$port_pid" 2>/dev/null || true
-            sleep 1
-            kill -0 "$port_pid" 2>/dev/null && kill -9 "$port_pid" 2>/dev/null || true
-            killed=true
-        fi
+    fi
+    # Port-level兜底: PID file may be stale or child proc inherited the socket
+    local port_pid
+    port_pid="$(pid_of_port "$PORT")"
+    if [[ -n "$port_pid" ]]; then
+        echo "Stopping orphaned server on port ${PORT} (PID: ${port_pid})..."
+        kill "$port_pid" 2>/dev/null || true
+        sleep 1
+        kill -0 "$port_pid" 2>/dev/null && kill -9 "$port_pid" 2>/dev/null || true
+        killed=true
     fi
 
+    # ── Stop Chat UI ──
     if is_running "$CHAT_PID_FILE"; then
         local pid
         pid="$(cat "$CHAT_PID_FILE")"
@@ -251,16 +252,15 @@ cmd_stop() {
         kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
         rm -f "$CHAT_PID_FILE"
         killed=true
-    else
-        local chat_pid
-        chat_pid="$(pid_of_port "$CHAT_PORT")"
-        if [[ -n "$chat_pid" ]]; then
-            echo "Stopping chat UI on port ${CHAT_PORT} (PID: ${chat_pid})..."
-            kill "$chat_pid" 2>/dev/null || true
-            sleep 1
-            kill -0 "$chat_pid" 2>/dev/null && kill -9 "$chat_pid" 2>/dev/null || true
-            killed=true
-        fi
+    fi
+    local chat_pid
+    chat_pid="$(pid_of_port "$CHAT_PORT")"
+    if [[ -n "$chat_pid" ]]; then
+        echo "Stopping orphaned chat UI on port ${CHAT_PORT} (PID: ${chat_pid})..."
+        kill "$chat_pid" 2>/dev/null || true
+        sleep 1
+        kill -0 "$chat_pid" 2>/dev/null && kill -9 "$chat_pid" 2>/dev/null || true
+        killed=true
     fi
 
     if [[ "$killed" == true ]]; then
