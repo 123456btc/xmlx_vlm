@@ -40,39 +40,90 @@ We stand on the shoulders of two excellent open-source projects — [**Blaizzy/m
 
 ## ⚡ Technical Advantages
 
-### 1. Thinking-Aware Constrained Generation
-Most structured-output engines break when a model enters a chain-of-thought "thinking" phase. XMLX-VLM ships a **`ThinkingAwareLogitsProcessor`** that maintains JSON-Schema and regex constraints **even while the model thinks out loud**. No more corrupted schemas after a `<think>` block.
+### 1. Thinking-Aware Constrained Generation (Logits-Level Lifecycle Management)
 
-### 2. Automatic Prefix Caching with SSD Persistence (APC)
-We ported the block-level prefix-caching concept from vLLM down to the MLX runtime, then added a **disk tier**: when `APC_DISK_PATH` is set, fully-computed KV blocks are written to sharded SSD files and can survive process restarts. Identical prompts warm-start in milliseconds instead of seconds.
+This is the architectural capability that no other open-source inference engine offers today.
 
-### 3. Speculative Decoding at Scale
+Modern reasoning models (Qwen3, DeepSeek-R1, Gemma4, etc.) emit a chain-of-thought inside `<think>...</think>` tags before producing the final answer. The industry has two broken approaches to structured output with these models:
+
+| Approach | Problem |
+|----------|---------|
+| **Constraint everywhere** | The JSON Schema is enforced during the thinking phase. The model cannot reason freely — it starts hallucinating structure inside its own monologue. |
+| **Post-process parsing** | The model generates unconstrained text, then you pray a regex extracts valid JSON from the tail. Fragile, non-deterministic, and unusable for tool calling. |
+
+XMLX-VLM solves this at the **logits level** with a four-phase state machine that lives inside the token loop:
+
+```
+IDLE ──► THINKING ──► TRANSITIONING ──► CONTENT
+```
+
+- **THINKING** — The model is free. No JSON Schema, no regex mask, no constraints. It can ramble, backtrack, and explore. We only count tokens against a configurable `thinking_budget`.
+- **TRANSITIONING** — When the budget expires (or the model naturally emits the end token), we **force the exact end-token sequence via logits masking** (`-inf` everywhere except the target token). This guarantees a clean, deterministic exit from the thinking span — no half-open tags, no drift.
+- **CONTENT** — The instant the thinking span closes, control is handed to the inner logits processor (JSON Schema, regex, or tool-parser). The very first content token is already constrained.
+
+Key implementation details:
+- **BoundedSuffixMatcher** with overlapping-prefix recovery detects `<think>` / `</think>` token sequences in O(1) amortized time.
+- **Snapshot/rollback** support means the state machine survives speculative-decoding rejections and dynamic batching without desync.
+- **Content-phase mask** prevents `<think>` tokens from leaking back into the final output after transition.
+- **Retirement signal** — once the processor reaches CONTENT with no inner constraint, it signals the engine to drop itself and re-enable MTP for the remaining generation.
+
+Result: your model can think for 512 tokens, then emit a perfectly valid JSON object or tool call — with zero post-processing.
+
+### 2. Multi-Format Reasoning Parsers + Tool-Call Promotion
+
+Six dedicated streaming parsers handle the post-processing side:
+
+| Parser | Format | Special Handling |
+|--------|--------|-----------------|
+| **Qwen3** | `<think>...</think>` | Implicit reasoning (prompt-injected `<think>`) |
+| **DeepSeek-R1** | `<think>...</think>` | Missing start-tag detection |
+| **Gemma4** | `<start_of_thought>...<end_of_thought>` | Multi-turn thought blocks |
+| **GLM4** | `<|channel>thought...<channel|>` | Channel-based reasoning |
+| **GPT-OSS** | Custom delimiter | OSS reasoning trace format |
+| **Harmony** | Structured thinking | Multi-step reasoning chains |
+
+Each parser implements a streaming state machine (`pre_think → thinking → content`) that splits delta chunks into `reasoning` and `content` streams in real time. The server exposes both via OpenAI-compatible `reasoning_content` and Anthropic-compatible `thinking` blocks.
+
+**Tool-Call Promotion**: When a `<tool_call>` block appears inside the thinking span, the parser automatically promotes it to the content stream. Closed tool calls are extracted via regex and appended to the final content; unclosed calls are flushed at stream end with a warning. This means a reasoning model can "think about calling a tool" and actually call it — without the tool XML leaking into the reasoning channel.
+
+### 3. Automatic Prefix Caching with SSD Persistence (APC)
+
+We ported the block-level prefix-caching concept from vLLM down to the MLX runtime, then added a **disk tier**:
+- KV cache is split into 16-token blocks, each identified by a chained hash (`H(prev_hash, token_slice, image_hash)`).
+- LRU eviction with reference counting keeps hot blocks in memory.
+- When `APC_DISK_PATH` is set, full blocks are written to sharded SSD files and survive process restarts.
+- Identical prompts warm-start in milliseconds instead of seconds — even after a server restart.
+
+### 4. Speculative Decoding at Scale
+
 XMLX-VLM ships with **two speculative drafter families**:
 - **DFlash** — ultra-light draft models that predict 2–3 tokens ahead with near-zero overhead.
 - **MTP** (Multi-Token Prediction) — parallel draft paths for high-entropy prompts.
 
 Combined with adaptive acceptance thresholds, speculative paths can significantly cut time-to-first-token on long-form generation.
 
-### 4. KV-Cache Quantization
+### 5. KV-Cache Quantization
+
 Memory is the bottleneck on unified-memory architectures. We support:
 - **Uniform quantization** (4-bit, 3.5-bit, 8-bit)
 - **TurboQuant** — an adaptive scheme that preserves attention precision where it matters and compresses where it does not.
 
-### 5. MoE Top-K Override
+### 6. MoE Top-K Override
+
 Mixture-of-Experts models are the new standard, but default routing wastes cycles. XMLX-VLM exposes **dynamic top-k override** so you can trade a fraction of accuracy for latency wins in latency-sensitive workloads.
 
-### 6. Multi-Format Reasoning Parsers
-Out-of-the-box parsers for **Qwen3, DeepSeek-R1, Gemma4, GLM4, GPT-OSS, and Harmony** reasoning formats. The server automatically strips internal monologue before returning structured JSON, while still exposing the raw chain-of-thought when you need it.
-
 ### 7. Tool Calling & MCP (Model Context Protocol)
+
 - Automatic tool-parser inference from the model processor
 - Pluggable tool modules
 - Built-in **MCP Manager** for connecting to external data sources, IDEs, and agent frameworks via stdio or SSE
 
 ### 8. Embedding & Rerank Engines
+
 A single process serves **vision-language chat**, **text embeddings**, and **reranking**. No need to run a separate embedding micro-service — reduce network hops and context-switching overhead.
 
 ### 9. Apple-Silicon Native Optimization
+
 - Flash Attention via `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion for vision encoders
 - Hardware-aware memory budgeting (M1 → M4 Ultra profiles baked in)
