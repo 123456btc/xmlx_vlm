@@ -1476,7 +1476,7 @@ def verify_api_key(request: Request):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-
+def load_model_resources(model_path: str, adapter_path: Optional[str]):
     """
     Loads model, processor, and config based on paths.
     Handles potential loading errors.
