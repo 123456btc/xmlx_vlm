@@ -237,11 +237,11 @@ pip install -e .
 ### 启动服务
 
 ```bash
-# 默认启动 — chat UI + DFlash 投机解码（推荐）
+# 默认启动 — 仅 server（无 Chat UI）
 ./service.sh start
 
-# 禁用 chat UI（纯 server 模式）
-./service.sh start --no-chat
+# 同时启动 chat UI
+./service.sh start --chat
 
 # 覆盖默认 API key + KV 量化，用于生产负载
 XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
@@ -304,7 +304,7 @@ exec "$HOME/.local/bin/claude" "$@"
 启动带磁盘 KV 缓存的服务：
 
 ```bash
-APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start --no-chat
+APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start
 ```
 
 ### Cline / Continue.dev（OpenAI 兼容）
@@ -340,6 +340,66 @@ aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
 - **API Key**: `x123456`
 - **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
 
+### Pi（pi.dev）
+
+Pi 是一款本地优先的编程 Agent，与 XMLX-VLM 配合良好。在 `~/.pi/agent/models.json` 中添加 provider：
+
+```json
+{
+  "providers": {
+    "xmlx-local": {
+      "name": "XMLX-VLM (local)",
+      "baseUrl": "http://localhost:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "x123456",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": false,
+        "thinkingFormat": "qwen",
+        "requiresReasoningContentOnAssistantMessages": false
+      },
+      "models": [
+        {
+          "id": "mlx-community/qwen3.6-35B-A3B-4bit",
+          "name": "Qwen3.6 35B A3B 4bit (XMLX-VLM local)",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 128000,
+          "maxTokens": 32768,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+然后在 `~/.pi/agent/settings.json` 设为默认：
+
+```json
+{
+  "defaultProvider": "xmlx-local",
+  "defaultModel": "mlx-community/qwen3.6-35B-A3B-4bit"
+}
+```
+
 ### 推荐的 Agent 服务端启动参数
 
 ```bash
@@ -347,7 +407,7 @@ aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
 APC_ENABLED=1 \
 APC_DISK_PATH=/tmp/xmlx-apc \
 XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
-./service.sh start --no-chat --ctx 100000
+./service.sh start --ctx 100000
 ```
 
 > **提示**：Agent 客户端的初始系统提示通常在 10k–30k token 之间。启用 `APC_DISK_PATH` 后，该前缀在首次预填充时写入 SSD，后续会话（即使服务器重启后）也能瞬间恢复。
@@ -365,7 +425,7 @@ XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
 ./service.sh logs chat
 
 # 零停机重启
-./service.sh restart --chat
+./service.sh restart
 ```
 
 - **PID 追踪** + orphan 进程兜底

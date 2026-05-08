@@ -1041,8 +1041,13 @@ def process_tool_calls(model_output: str, tool_module, tools):
                             },
                         }
                     )
-                except Exception:
-                    print(f"Invalid tool call: {call}")
+                except Exception as exc:
+                    logger.warning("Invalid tool call: %s | error: %s", call, exc)
+                    # Append a visible marker to remaining_text so the model
+                    # (and client) knows parsing failed instead of silently
+                    # dropping the call.
+                    err_marker = f"[Tool call parsing failed: {exc}]"
+                    remaining = f"{remaining}\n{err_marker}".strip()
     return dict(calls=called_tools, remaining_text=remaining)
 
 
@@ -2156,6 +2161,19 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
         # Get model, processor, config - loading if necessary
         model, processor, config = get_cached_model(openai_request.model)
 
+        # Initialize reasoning parser for thinking models
+        reasoning_parser_name = _infer_reasoning_parser(model, config)
+        reasoning_parser = None
+        if reasoning_parser_name:
+            try:
+                parser_cls = _get_reasoning_parser_cls(reasoning_parser_name)
+                reasoning_parser = parser_cls(
+                    getattr(processor, "tokenizer", processor)
+                )
+                logger.debug("Using reasoning parser: %s", reasoning_parser_name)
+            except Exception:
+                logger.debug("Failed to load reasoning parser: %s", reasoning_parser_name)
+
         kwargs = {}
 
         chat_messages = []
@@ -2646,6 +2664,18 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                 msg["tool_call_id"] = message.tool_call_id
             if message.name is not None:
                 msg["name"] = message.name
+
+            # Guard against empty tool results that confuse local models into
+            # hallucination loops. Provide an explicit sentinel so the model
+            # knows the tool executed but produced no usable output.
+            if msg.get("role") == "tool":
+                content = msg.get("content")
+                if content is None or (isinstance(content, str) and not content.strip()):
+                    tool_name = msg.get("name", "unknown")
+                    msg["content"] = (
+                        f"[Tool '{tool_name}' returned empty or missing output. "
+                        f"If this was unexpected, verify the arguments and try again.]"
+                    )
 
             processed_messages.append(msg)
 

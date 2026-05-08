@@ -235,11 +235,11 @@ pip install -e .
 ### Start the Server
 
 ```bash
-# Default start — chat UI + DFlash speculative decoding (recommended)
+# Default start — server only (headless, no Chat UI)
 ./service.sh start
 
-# Disable chat UI (headless server mode)
-./service.sh start --no-chat
+# Enable chat UI alongside server
+./service.sh start --chat
 
 # Override default API key + KV quantization for production workloads
 XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
@@ -302,7 +302,7 @@ exec "$HOME/.local/bin/claude" "$@"
 Start the server with disk KV cache:
 
 ```bash
-APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start --no-chat
+APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start
 ```
 
 ### Cline / Continue.dev (OpenAI-compatible)
@@ -338,6 +338,66 @@ In Cursor Settings → Models → Add Model:
 - **API Key**: `x123456`
 - **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
 
+### Pi (pi.dev)
+
+Pi is a local-first coding agent that pairs well with XMLX-VLM. Add the provider to `~/.pi/agent/models.json`:
+
+```json
+{
+  "providers": {
+    "xmlx-local": {
+      "name": "XMLX-VLM (local)",
+      "baseUrl": "http://localhost:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "x123456",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": false,
+        "thinkingFormat": "qwen",
+        "requiresReasoningContentOnAssistantMessages": false
+      },
+      "models": [
+        {
+          "id": "mlx-community/qwen3.6-35B-A3B-4bit",
+          "name": "Qwen3.6 35B A3B 4bit (XMLX-VLM local)",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 128000,
+          "maxTokens": 32768,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Then set as default in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "defaultProvider": "xmlx-local",
+  "defaultModel": "mlx-community/qwen3.6-35B-A3B-4bit"
+}
+```
+
 ### Recommended Agent Server Flags
 
 ```bash
@@ -345,7 +405,7 @@ In Cursor Settings → Models → Add Model:
 APC_ENABLED=1 \
 APC_DISK_PATH=/tmp/xmlx-apc \
 XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
-./service.sh start --no-chat --ctx 100000
+./service.sh start --ctx 100000
 ```
 
 > **Tip**: Agent clients often send 10k–30k tokens for the initial system prompt. With `APC_DISK_PATH`, this prefix is written to SSD during the first prefill and restored instantly on subsequent sessions — even after a server restart.
@@ -363,7 +423,7 @@ XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
 ./service.sh logs chat
 
 # Zero-downtime restart
-./service.sh restart --chat
+./service.sh restart
 ```
 
 - **PID tracking** with orphan-process fallback

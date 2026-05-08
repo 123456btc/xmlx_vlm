@@ -37,8 +37,8 @@ EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
 DRAFT_MODEL="${XMLX_VLM_DRAFT_MODEL:-z-lab/Qwen3.6-35B-A3B-DFlash}"
 DRAFT_KIND="${XMLX_VLM_DRAFT_KIND:-dflash}"
 
-# Default to launching chat UI unless explicitly disabled via XMLX_VLM_CHAT=false
-CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
+# Default to NOT launching chat UI unless explicitly enabled via XMLX_VLM_CHAT=true
+CHAT_ENABLED="${XMLX_VLM_CHAT:-false}"
 
 SERVER_PID_FILE="${PID_DIR}/server.pid"
 CHAT_PID_FILE="${PID_DIR}/chat.pid"
@@ -356,9 +356,9 @@ case "$cmd" in
 XMLX VLM Service Manager
 
 Usage:
-  $(basename "$0") start [--no-chat] [SERVER_OPTS]   Start server with chat UI by default
+  $(basename "$0") start [--chat] [SERVER_OPTS]      Start server (chat UI is opt-in)
   $(basename "$0") stop                               Stop server and chat UI
-  $(basename "$0") restart [--no-chat] [SERVER_OPTS]  Restart server
+  $(basename "$0") restart [--chat] [SERVER_OPTS]     Restart server
   $(basename "$0") status                             Show running status
   $(basename "$0") logs [server|chat]                 Tail logs
 
@@ -376,14 +376,14 @@ Environment:
   XMLX_VLM_ARGS        Extra server args (e.g. "--enable-thinking --moe-top-k 4")
   XMLX_VLM_DRAFT_MODEL Speculative drafter (default: ${DRAFT_MODEL}; set empty to disable)
   XMLX_VLM_DRAFT_KIND  Drafter family (default: ${DRAFT_KIND})
-  XMLX_VLM_CHAT        Launch chat UI (default: true; set "false" to disable)
+  XMLX_VLM_CHAT        Launch chat UI (default: false; set "true" to enable)
 
 Examples:
-  # Default start — chat UI + DFlash speculative decoding
+  # Default start — server only
   ./$(basename "$0") start
 
-  # Disable chat UI, keep draft model
-  ./$(basename "$0") start --no-chat
+  # Start with chat UI
+  ./$(basename "$0") start --chat
 
   # Custom auth + KV quantization
   XMLX_VLM_API_KEY=mykey ./$(basename "$0") start --kv-bits 3.5 --kv-quant-scheme turboquant
