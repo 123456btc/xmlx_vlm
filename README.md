@@ -112,17 +112,17 @@ Memory is the bottleneck on unified-memory architectures. We support:
 
 Mixture-of-Experts models are the new standard, but default routing wastes cycles. XMLX-VLM exposes **dynamic top-k override** so you can trade a fraction of accuracy for latency wins in latency-sensitive workloads.
 
-### 7. Tool Calling & MCP (Model Context Protocol)
+### 8. Tool Calling & MCP (Model Context Protocol)
 
 - Automatic tool-parser inference from the model processor
 - Pluggable tool modules
 - Built-in **MCP Manager** for connecting to external data sources, IDEs, and agent frameworks via stdio or SSE
 
-### 8. Embedding & Rerank Engines
+### 9. Embedding & Rerank Engines
 
 A single process serves **vision-language chat**, **text embeddings**, and **reranking**. No need to run a separate embedding micro-service — reduce network hops and context-switching overhead.
 
-### 9. Apple-Silicon Native Optimization
+### 10. Apple-Silicon Native Optimization
 
 - Flash Attention via `mx.fast.scaled_dot_product_attention`
 - Metal kernel fusion for vision encoders
@@ -253,6 +253,7 @@ XMLX-VLM is a **hard-fork** that consciously builds on top of several outstandin
 |---------|-----------------|---------------|
 | [**Blaizzy/mlx-vlm**](https://github.com/Blaizzy/mlx-vlm) | Core VLM model loading, weight conversion, and MLX generation primitives | Production server, speculative decoding, structured output, tool calling, MCP, embedding/rerank engines |
 | [**vllm-mlx**](https://github.com/vllm-project/vllm) (community patterns) | Metrics design, model registry patterns, hardware detection concepts | SSD-persistent APC cache, Apple-Silicon-specific memory budgeting, unified CLI |
+| [**Rapid-MLX**](https://github.com/raullenchai/Rapid-MLX) | Tool-call auto-recovery, jump-forward logits bias, DeltaNet state snapshots | Adapted auto-recovery and jump-forward decoding; inspired hybrid-cache architecture roadmap |
 | **Anthropic SDK** | Message format and tool-use schema | First-class `/v1/messages` endpoint with streaming, tool results, and thinking blocks |
 | [**llama.cpp**](https://github.com/ggerganov/llama.cpp) | Mixed quantization predicates (Q4_K_M-style strategies) | Integration into the MLX conversion pipeline |
 | [**Hugging Face Transformers**](https://github.com/huggingface/transformers) | Tokenizer utilities, sampling logic, AutoModel loading | MLX-native weight conversion, batch streaming, thinking-aware processors |

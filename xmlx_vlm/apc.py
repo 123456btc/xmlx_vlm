@@ -221,6 +221,96 @@ def _clone_cache_entry_for_apc(
             return None
         return tuple(copied)
 
+    # Batch caches (used by continuous-batching path and hybrid SSM models)
+    if isinstance(c, lm_cache.BatchKVCache):
+        out = type(c)(c.left_padding.tolist())
+        out._idx = int(getattr(c, "_idx", 0) or 0)
+        out._right_padding = getattr(c, "_right_padding", None)
+        if c.keys is not None:
+            out.keys = _copy_mlx_array(c.keys)
+            eval_targets.append(out.keys)
+        if c.values is not None:
+            out.values = _copy_mlx_array(c.values)
+            eval_targets.append(out.values)
+        if c.offset is not None:
+            out.offset = _copy_mlx_array(c.offset)
+            eval_targets.append(out.offset)
+        if c.left_padding is not None:
+            out.left_padding = _copy_mlx_array(c.left_padding)
+            eval_targets.append(out.left_padding)
+        return out
+
+    if isinstance(c, lm_cache.BatchRotatingKVCache):
+        out = type(c)(
+            max_size=int(getattr(c, "max_size", 0)),
+            left_padding=c.left_padding.tolist(),
+        )
+        out._idx = int(getattr(c, "_idx", 0) or 0)
+        out._offset = int(getattr(c, "_offset", 0) or 0)
+        out.rotated = bool(getattr(c, "rotated", False))
+        if c.keys is not None:
+            out.keys = _copy_mlx_array(c.keys)
+            eval_targets.append(out.keys)
+        if c.values is not None:
+            out.values = _copy_mlx_array(c.values)
+            eval_targets.append(out.values)
+        if c.offset is not None:
+            out.offset = _copy_mlx_array(c.offset)
+            eval_targets.append(out.offset)
+        if c.left_padding is not None:
+            out.left_padding = _copy_mlx_array(c.left_padding)
+            eval_targets.append(out.left_padding)
+        if getattr(c, "_lengths", None) is not None:
+            out._lengths = _copy_mlx_array(c._lengths)
+            eval_targets.append(out._lengths)
+        return out
+
+    if isinstance(c, lm_cache.ConcatenateKVCache):
+        out = type(c)()
+        if c.keys is not None:
+            out.keys = _copy_mlx_array(c.keys)
+            eval_targets.append(out.keys)
+        if c.values is not None:
+            out.values = _copy_mlx_array(c.values)
+            eval_targets.append(out.values)
+        out.offset = int(getattr(c, "offset", 0) or 0)
+        return out
+
+    # Generic fallback for _BaseCache subclasses with state/meta_state.
+    # Used for custom SSM caches (DeltaNet, Mamba, etc.) that store
+    # recurrent state alongside KV tensors.
+    if hasattr(c, "state") and hasattr(c, "meta_state"):
+        try:
+            state = c.state
+            meta = c.meta_state
+            out = type(c).__new__(type(c))
+            out.state = state
+            out.meta_state = meta
+            # Deep-copy any MLX arrays that were set by reference
+            for attr in dir(c):
+                if attr.startswith("_"):
+                    continue
+                val = getattr(c, attr, None)
+                if val is None or attr in ("state", "meta_state"):
+                    continue
+                if isinstance(val, mx.array):
+                    copied = _copy_mlx_array(val)
+                    setattr(out, attr, copied)
+                    eval_targets.append(copied)
+                elif isinstance(val, (list, tuple)) and val:
+                    new_list = []
+                    for item in val:
+                        if isinstance(item, mx.array):
+                            copied = _copy_mlx_array(item)
+                            new_list.append(copied)
+                            eval_targets.append(copied)
+                        else:
+                            new_list.append(item)
+                    setattr(out, attr, type(val)(new_list))
+            return out
+        except Exception:
+            pass
+
     return None
 
 
@@ -279,6 +369,9 @@ def _cache_entry_supports_exact_apc(c: Any) -> bool:
             lm_cache.RotatingKVCache,
             lm_cache.ChunkedKVCache,
             lm_cache.ArraysCache,
+            lm_cache.BatchKVCache,
+            lm_cache.BatchRotatingKVCache,
+            lm_cache.ConcatenateKVCache,
         ),
     ):
         return True
@@ -286,6 +379,9 @@ def _cache_entry_supports_exact_apc(c: Any) -> bool:
         return all(_cache_entry_supports_exact_apc(sub_c) for sub_c in c.caches)
     if isinstance(c, tuple):
         return all(_cache_entry_supports_exact_apc(sub_c) for sub_c in c)
+    # Generic fallback: any _BaseCache subclass with state/meta_state
+    if hasattr(c, "state") and hasattr(c, "meta_state"):
+        return True
     return False
 
 

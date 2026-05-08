@@ -17,6 +17,7 @@ from .abstract_tool_parser import (
     ToolParserManager,
 )
 from .gemma4_tool_parser import Gemma4ToolParser
+from .recovery import attempt_recovery
 
 
 def generate_tool_id() -> str:
@@ -262,10 +263,31 @@ class AutoToolParser(ToolParser):
                 tool_calls=tool_calls,
                 content=cleaned_text if cleaned_text else None,
             )
-        else:
+
+        # Final fallback: heuristic auto-recovery for broken / truncated output
+        recovered = attempt_recovery(model_output)
+        if recovered:
+            tool_calls = [
+                {
+                    "id": generate_tool_id(),
+                    "name": obj.get("name") or obj.get("type", "unknown"),
+                    "arguments": (
+                        json.dumps(obj.get("arguments", {}), ensure_ascii=False)
+                        if isinstance(obj.get("arguments"), dict)
+                        else str(obj.get("arguments", {}))
+                    ),
+                }
+                for obj in recovered
+            ]
             return ExtractedToolCallInformation(
-                tools_called=False, tool_calls=[], content=model_output
+                tools_called=True,
+                tool_calls=tool_calls,
+                content=None,
             )
+
+        return ExtractedToolCallInformation(
+            tools_called=False, tool_calls=[], content=model_output
+        )
 
     def _parse_raw_json_tool_calls(self, text: str) -> list[dict[str, Any]]:
         """

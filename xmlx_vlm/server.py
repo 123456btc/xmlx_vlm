@@ -54,6 +54,7 @@ from .constrained import ThinkingAwareLogitsProcessor
 from .generate import DEFAULT_THINKING_END_TOKEN, DEFAULT_THINKING_START_TOKEN
 from .tokenizer_utils import make_streaming_detokenizer
 from .tool_parsers import _infer_tool_parser_from_processor, load_tool_module
+from .tool_logits_bias import ToolLogitsBiasProcessor
 from .embedding_engine import EmbeddingEngine
 from .rerank_engine import RerankEngine
 from .metrics import metrics
@@ -72,6 +73,7 @@ DEFAULT_SERVER_PORT = 8080
 DEFAULT_TOKEN_QUEUE_TIMEOUT = 600.0
 DEFAULT_FIRST_TOKEN_TIMEOUT = None  # No timeout for first token (prefill) by default
 DEFAULT_ENABLE_THINKING = False
+DEFAULT_ENABLE_TOOL_LOGITS_BIAS = False
 
 
 def _get_speculative_rounds_batch(draft_kind: str):
@@ -137,6 +139,19 @@ def get_token_queue_timeout():
 def get_first_token_timeout():
     return _parse_timeout_env("XMLX_VLM_FIRST_TOKEN_TIMEOUT", DEFAULT_FIRST_TOKEN_TIMEOUT)
 
+
+_ENABLE_TOOL_LOGITS_BIAS: Optional[bool] = None
+
+def get_server_enable_tool_logits_bias():
+    global _ENABLE_TOOL_LOGITS_BIAS
+    if _ENABLE_TOOL_LOGITS_BIAS is not None:
+        return _ENABLE_TOOL_LOGITS_BIAS
+    env = os.environ.get("XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS", "")
+    return env.lower() in ("1", "true", "yes")
+
+def set_server_enable_tool_logits_bias(value: bool):
+    global _ENABLE_TOOL_LOGITS_BIAS
+    _ENABLE_TOOL_LOGITS_BIAS = value
 
 def get_server_enable_thinking():
     raw = os.environ.get("XMLX_VLM_ENABLE_THINKING")
@@ -213,6 +228,7 @@ class GenerationArguments:
     # cached blocks from one tenant can't be reused (or detected via timing)
     # by another. None = no salt = single-tenant behaviour.
     tenant_id: Optional[str] = None
+    enable_tool_logits_bias: bool = DEFAULT_ENABLE_TOOL_LOGITS_BIAS
 
     def to_generate_kwargs(self) -> dict:
         """Convert to kwargs dict for generate()/stream_generate()."""
@@ -239,6 +255,14 @@ class GenerationArguments:
         if self.tenant_id is not None:
             kw["apc_tenant"] = self.tenant_id
         return kw
+
+    def maybe_add_tool_logits_bias(self, tokenizer, tools_present: bool) -> None:
+        """Add ToolLogitsBiasProcessor if enabled and tools are present."""
+        if not self.enable_tool_logits_bias or not tools_present:
+            return
+        if self.logits_processors is None:
+            self.logits_processors = []
+        self.logits_processors.append(ToolLogitsBiasProcessor(tokenizer))
 
     def to_template_kwargs(self) -> dict:
         """Convert to kwargs for apply_chat_template()."""
@@ -1039,6 +1063,11 @@ def _build_gen_args(
         "enable_thinking",
         get_server_enable_thinking(),
     )
+    enable_tool_logits_bias = _request_field_or_default(
+        request,
+        "enable_tool_logits_bias",
+        get_server_enable_tool_logits_bias(),
+    )
     args = GenerationArguments(
         max_tokens=max_tokens,
         temperature=getattr(request, "temperature", DEFAULT_TEMPERATURE),
@@ -1052,9 +1081,14 @@ def _build_gen_args(
         thinking_start_token=getattr(request, "thinking_start_token", None),
         thinking_end_token=getattr(request, "thinking_end_token", None),
         tenant_id=tenant_id,
+        enable_tool_logits_bias=enable_tool_logits_bias,
     )
     if processor is not None:
         args.logits_processors = _build_structured_logits_processors(request, processor, args)
+        # Jump-forward decoding: bias tool-call tokens when tools are present
+        tools_present = bool(getattr(request, "tools", None))
+        tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
+        args.maybe_add_tool_logits_bias(tokenizer, tools_present)
     return args
 
 
@@ -3570,6 +3604,16 @@ def main():
         default=None,
         help="Path to MCP config file (JSON/YAML) for external MCP servers.",
     )
+    parser.add_argument(
+        "--enable-tool-logits-bias",
+        action="store_true",
+        default=DEFAULT_ENABLE_TOOL_LOGITS_BIAS,
+        help=(
+            "Bias logits toward structured tool-call tokens (e.g. <tool_call>, {, "
+            '\"name\") to accelerate tool-call generation. Similar to Rapid-MLX\'s '
+            "jump-forward decoding."
+        ),
+    )
     args = parser.parse_args()
     global _API_KEY
     _API_KEY = args.api_key
@@ -3611,6 +3655,7 @@ def main():
         os.environ["MLX_MOE_TOP_K"] = str(args.moe_top_k)
     if args.mcp_config:
         os.environ["MLX_MCP_CONFIG"] = args.mcp_config
+    os.environ["XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS"] = "1" if args.enable_tool_logits_bias else "0"
 
     # Configure logging
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
