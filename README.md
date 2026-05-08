@@ -35,7 +35,7 @@ No cloud subscription. No data retention policy. No third-party terms of service
 
 ### 🧬 The AFRE Ecosystem
 
-XMLX-VLM is the **private AI brain** of the [AFRE (AI Factor Research Engine)](https://github.com/123456btc/ai_factor_research_engine_framework) ecosystem — a domain-first, agent-augmented quantitative research platform built on DDD, Hexagonal Architecture, and Clean Architecture.
+XMLX-VLM is the **private AI brain** of the **AFRE (AI Factor Research Engine)** ecosystem — a domain-first, agent-augmented quantitative research platform built on DDD, Hexagonal Architecture, and Clean Architecture.
 
 AFRE researches the **genealogy of market factors**: why they were invented, how they spread, why they decayed, and what broken assumptions can generate modern hypotheses. XMLX-VLM powers AFRE's agent runtime by providing:
 

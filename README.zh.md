@@ -35,7 +35,7 @@
 
 ### 🧬 AFRE 生态系统
 
-XMLX-VLM 是 [AFRE（AI Factor Research Engine）](https://github.com/123456btc/ai_factor_research_engine_framework) 生态系统的**私有化 AI 大脑**——一个基于 DDD、六边形架构和 Clean Architecture 的领域优先、Agent 增强的量化研究平台。
+XMLX-VLM 是 **AFRE（AI Factor Research Engine）** 生态系统的**私有化 AI 大脑**——一个基于 DDD、六边形架构和 Clean Architecture 的领域优先、Agent 增强的量化研究平台。
 
 AFRE 研究**市场因子的谱系**：它们为什么被发明、如何传播、为何失效，以及哪些失效假设可以生成现代假设。XMLX-VLM 为 AFRE 的 Agent Runtime 提供本地推理能力：
 

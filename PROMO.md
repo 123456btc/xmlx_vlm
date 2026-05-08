@@ -362,5 +362,4 @@ git clone → pip install → ./service.sh start
 5 分钟，你的 alpha 不再流浪。
 
 https://github.com/123456btc/xmlx_vlm
-https://github.com/123456btc/ai_factor_research_engine_framework
 
