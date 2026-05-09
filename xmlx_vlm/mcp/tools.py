@@ -3,9 +3,12 @@
 Built-in MCP tools for mlx_vlm.
 
 Provides filesystem, shell, and Git operations scoped to the working directory.
+Finance-mode additions: shell hardening, PII scrubbing, resource limits.
 """
 
 import os
+import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -20,6 +23,29 @@ def _resolve(path: str) -> Path:
     if not p.is_absolute():
         p = _cwd() / p
     return p.resolve()
+
+
+# ─── PII scrubbing ─────────────────────────────────────────────────────────
+
+_PII_PATTERNS = [
+    (re.compile(r"\b4[0-9]{12}(?:[0-9]{3})?\b"), "[CREDIT_CARD]"),          # Visa
+    (re.compile(r"\b5[1-5][0-9]{14}\b"), "[CREDIT_CARD]"),                  # Mastercard
+    (re.compile(r"\b3[47][0-9]{13}\b"), "[CREDIT_CARD]"),                   # Amex
+    (re.compile(r"\b(?:\d{6})\d{8}(?:\d{2})?\b"), "[ID_CARD]"),           # Generic ID (simplified)
+    (re.compile(r"\b1[3-9]\d{9}\b"), "[PHONE]"),                           # CN mobile
+    (re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"), "[BANK_CARD]"),  # Bank card
+]
+
+_FINANCE_MODE = os.environ.get("XMLX_VLM_FINANCE_MODE", "0").lower() in ("1", "true", "yes")
+
+
+def _scrub_pii(text: str) -> str:
+    """Scrub common PII patterns from tool output (finance mode only)."""
+    if not _FINANCE_MODE:
+        return text
+    for pattern, replacement in _PII_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +66,7 @@ def read_file(path: str, offset: int = 0, limit: int = 0) -> str:
         lines = lines[offset:]
     if limit and limit < len(lines):
         lines = lines[:limit]
-    return "\n".join(lines)
+    return _scrub_pii("\n".join(lines))
 
 
 def write_file(path: str, content: str) -> str:
@@ -91,18 +117,49 @@ SAFE_SHELL_COMMANDS = {
 }
 
 
+def _has_shell_metacharacters(cmd: str) -> bool:
+    """Detect shell metacharacters that could enable command chaining."""
+    meta = set(";|&`$()<>{}\n")
+    return any(c in meta for c in cmd)
+
+
 def shell(command: str, timeout: int = 30) -> str:
     """Run a shell command with safety restrictions."""
     cmd = command.strip()
     if not cmd:
         return "Error: empty command"
-    first_word = cmd.split()[0]
+
+    # Finance mode: shell is disabled
+    if _FINANCE_MODE:
+        return "Error: shell tool is disabled in finance mode"
+
+    # Parse command to extract first word
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError as e:
+        return f"Error: invalid shell syntax: {e}"
+
+    if not tokens:
+        return "Error: empty command"
+
+    first_word = tokens[0]
     if first_word not in SAFE_SHELL_COMMANDS:
-        return f"Error: command '{first_word}' is not in the allow-list. Allowed: {', '.join(sorted(SAFE_SHELL_COMMANDS))}"
+        return (
+            f"Error: command '{first_word}' is not in the allow-list. "
+            f"Allowed: {', '.join(sorted(SAFE_SHELL_COMMANDS))}"
+        )
+
+    # Block shell metacharacters (prevents chaining: git status; rm -rf /)
+    if _has_shell_metacharacters(cmd):
+        return (
+            "Error: command contains shell metacharacters (;|&`$() etc.) "
+            "which are not allowed for security reasons"
+        )
+
     try:
         result = subprocess.run(
-            cmd,
-            shell=True,
+            tokens,
+            shell=False,  # Hardened: no shell interpretation
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -113,7 +170,7 @@ def shell(command: str, timeout: int = 30) -> str:
             out += "\n[stderr]\n" + result.stderr
         if result.returncode != 0:
             out += f"\n[exit code {result.returncode}]"
-        return out or "(no output)"
+        return _scrub_pii(out or "(no output)")
     except subprocess.TimeoutExpired:
         return f"Error: command timed out after {timeout}s"
     except Exception as e:

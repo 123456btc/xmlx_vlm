@@ -434,6 +434,7 @@ class UsageStats(BaseModel):
 
 class ChatRequest(GenerationRequest):
     messages: List[ChatMessage]
+    session_id: Optional[str] = Field(default=None, description="Session identifier for memory persistence.")
 
 
 # ─── Anthropic-compatible models ────────────────────────────────────────────

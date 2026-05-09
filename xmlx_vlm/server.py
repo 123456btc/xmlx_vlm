@@ -113,6 +113,7 @@ from .utils import load, prepare_inputs
 from .version import __version__
 from .vision_cache import VisionFeatureCache
 from .mcp import get_manager
+from .memory import get_memory_store
 from .reasoning import get_parser as _get_reasoning_parser_cls
 from .moe_topk import apply_moe_top_k_override
 from .patches import apply_all_patches
@@ -2860,12 +2861,43 @@ async def mcp_chat_completions_endpoint(request: ChatRequest, http_request: Requ
         object.__setattr__(request, "mcp", True)
 
     mcp_manager = get_manager()
+    memory_store = get_memory_store()
     max_rounds = int(os.environ.get("MLX_MCP_MAX_ROUNDS", "3"))
 
     all_messages = list(request.messages)
     total_prompt_tokens = 0
     total_completion_tokens = 0
     total_peak_memory = 0.0
+
+    # Inject relevant memories into system message before first LLM call
+    if memory_store and all_messages:
+        user_text = ""
+        for m in all_messages:
+            if m.role == "user" and isinstance(m.content, str):
+                user_text = m.content
+                break
+        if user_text:
+            memories = memory_store.search(user_text)
+            if memories:
+                memory_text = "\n".join(
+                    f"- {m['content']}" for m in memories
+                )
+                sys_prefix = (
+                    "The following relevant context from previous conversations "
+                    "may help you answer:\n" + memory_text + "\n\n"
+                )
+                # Inject into existing system message or prepend new one
+                if all_messages[0].role in ("system", "developer"):
+                    existing = all_messages[0].content or ""
+                    all_messages[0] = ChatMessage(
+                        role=all_messages[0].role,
+                        content=sys_prefix + existing,
+                    )
+                else:
+                    all_messages.insert(
+                        0,
+                        ChatMessage(role="system", content=sys_prefix),
+                    )
 
     for round_idx in range(max_rounds):
         # Update messages in the request for this round
@@ -2894,7 +2926,7 @@ async def mcp_chat_completions_endpoint(request: ChatRequest, http_request: Requ
         if not msg.tool_calls:
             break
 
-        # Execute MCP tool calls
+        # Execute MCP tool calls in parallel
         tool_results = await mcp_manager.execute(msg.tool_calls)
         for tr in tool_results:
             all_messages.append(
@@ -2908,6 +2940,15 @@ async def mcp_chat_completions_endpoint(request: ChatRequest, http_request: Requ
     else:
         # Max rounds reached — return what we have
         pass
+
+    # Persist conversation snippets to memory
+    if memory_store:
+        session_id = getattr(request, "session_id", None) or "default"
+        for m in all_messages:
+            if m.role == "user" and isinstance(m.content, str) and m.content.strip():
+                memory_store.add(session_id, m.content, {"role": "user"})
+            elif m.role == "assistant" and isinstance(m.content, str) and m.content.strip():
+                memory_store.add(session_id, m.content, {"role": "assistant"})
 
     # Build final response with accumulated stats
     final_choice = result.choices[0]
@@ -2942,6 +2983,44 @@ async def mcp_tools_endpoint(_=Depends(verify_api_key)):
     """List all available MCP tools (builtin + external)."""
     mcp_manager = get_manager()
     return {"tools": mcp_manager.schemas}
+
+
+# ─── Memory endpoints ───────────────────────────────────────────────────────
+
+
+@app.get("/v1/memory/status", response_model=None)
+async def memory_status_endpoint(_=Depends(verify_api_key)):
+    """Get memory store status."""
+    store = get_memory_store()
+    if store is None:
+        return {"enabled": False}
+    return {"enabled": True, **store.stats()}
+
+
+@app.post("/v1/memory/search", response_model=None)
+async def memory_search_endpoint(request: Request, _=Depends(verify_api_key)):
+    """Search memories by query."""
+    store = get_memory_store()
+    if store is None:
+        return {"error": "Memory store not enabled"}
+    body = await request.json()
+    query = body.get("query", "")
+    session_id = body.get("session_id")
+    top_k = body.get("top_k")
+    results = store.search(query, session_id=session_id, top_k=top_k)
+    return {"results": results}
+
+
+@app.post("/v1/memory/clear", response_model=None)
+async def memory_clear_endpoint(request: Request, _=Depends(verify_api_key)):
+    """Clear memories for a session or all memories."""
+    store = get_memory_store()
+    if store is None:
+        return {"error": "Memory store not enabled"}
+    body = await request.json()
+    session_id = body.get("session_id")
+    deleted = store.clear(session_id=session_id)
+    return {"deleted": deleted, "session_id": session_id}
 
 
 # ─── Embeddings endpoint ────────────────────────────────────────────────────

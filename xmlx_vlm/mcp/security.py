@@ -6,13 +6,74 @@ Security policies for MCP tool execution.
 - Command filtering: only allow-listed shell commands
 - Read-only mode: prevents write/delete operations
 - MCP server command validation: whitelist + blocked patterns
+- Finance mode: strict defaults for financial-sector deployments
+- Tool whitelist: per-deployment allowed tools
+- Config integrity: SHA256 verification of MCP config files
 """
 
+import hashlib
 import os
 import re
 from pathlib import Path
 from typing import List, Optional, Set
 
+
+_FINANCE_MODE = os.environ.get("XMLX_VLM_FINANCE_MODE", "0").lower() in ("1", "true", "yes")
+
+# ─── Finance mode overrides ────────────────────────────────────────────────
+
+if _FINANCE_MODE:
+    # Force disable unsafe bypass
+    os.environ["MLX_MCP_ALLOW_UNSAFE"] = "0"
+    # Default to read-only unless explicitly overridden
+    if "MLX_MCP_READONLY" not in os.environ:
+        os.environ["MLX_MCP_READONLY"] = "true"
+
+
+# ─── Tool whitelist ────────────────────────────────────────────────────────
+
+_TOOL_WHITELIST_RAW = os.environ.get("XMLX_VLM_ALLOWED_TOOLS", "")
+if _TOOL_WHITELIST_RAW and _TOOL_WHITELIST_RAW.strip():
+    _TOOL_WHITELIST: Optional[Set[str]] = set(t.strip() for t in _TOOL_WHITELIST_RAW.split(",") if t.strip())
+else:
+    _TOOL_WHITELIST = None  # None means "all allowed" (legacy behavior)
+
+
+# Finance mode default: only safe read-only tools
+if _FINANCE_MODE and _TOOL_WHITELIST is None:
+    _TOOL_WHITELIST = {"read_file", "list_dir", "search_files"}
+
+
+def is_tool_allowed(name: str) -> bool:
+    """Check if a tool is in the deployment whitelist."""
+    if _TOOL_WHITELIST is None:
+        return True
+    return name in _TOOL_WHITELIST
+
+
+def get_allowed_tools() -> Optional[Set[str]]:
+    """Return the current tool whitelist, or None if all allowed."""
+    return _TOOL_WHITELIST.copy() if _TOOL_WHITELIST else None
+
+
+# ─── Config integrity ──────────────────────────────────────────────────────
+
+_CONFIG_HASH_EXPECTED = os.environ.get("XMLX_VLM_MCP_CONFIG_HASH", "").strip()
+
+
+def verify_config_integrity(config_path: str) -> bool:
+    """Verify MCP config file SHA256 against expected hash (if set)."""
+    if not _CONFIG_HASH_EXPECTED:
+        return True
+    try:
+        with open(config_path, "rb") as f:
+            actual = hashlib.sha256(f.read()).hexdigest()
+        return actual.lower() == _CONFIG_HASH_EXPECTED.lower()
+    except Exception:
+        return False
+
+
+# ─── SecurityPolicy ────────────────────────────────────────────────────────
 
 class SecurityPolicy:
     """Defines what an MCP session is allowed to do."""
@@ -139,8 +200,8 @@ def validate_mcp_server_config(
     Raises:
         MCPSecurityError: If the configuration violates security policy
     """
-    # Allow bypass for local development
-    if os.environ.get("MLX_MCP_ALLOW_UNSAFE", "0") == "1":
+    # Finance mode: never allow bypass
+    if not _FINANCE_MODE and os.environ.get("MLX_MCP_ALLOW_UNSAFE", "0") == "1":
         return
 
     # SSE transport has fewer risks; only basic URL validation

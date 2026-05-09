@@ -14,10 +14,13 @@ from typing import Any, Dict, List, Optional
 from .client import MCPClient
 from .config import load_mcp_config
 from .executor import ToolExecutor
+from .security import MCPSecurityError, verify_config_integrity
 from .tools import TOOL_SCHEMAS
 from .types import MCPConfig, MCPToolResult
 
 logger = logging.getLogger("xmlx_vlm.mcp.manager")
+
+_FINANCE_MODE = os.environ.get("XMLX_VLM_FINANCE_MODE", "0").lower() in ("1", "true", "yes")
 
 
 class MCPManager:
@@ -42,6 +45,24 @@ class MCPManager:
     async def connect_external_servers(self, config_path: Optional[str] = None) -> None:
         """Load MCP config and connect to all enabled external servers."""
         if not self.enabled:
+            return
+
+        # Finance mode: block external MCP servers entirely
+        if _FINANCE_MODE:
+            logger.warning("Finance mode: external MCP servers are disabled")
+            from ..audit import get_audit_logger
+            audit = get_audit_logger()
+            if audit:
+                audit.log_security_event("blocked_external_mcp", "finance_mode")
+            return
+
+        # Config integrity check
+        if config_path and not verify_config_integrity(config_path):
+            logger.error(f"MCP config integrity check failed: {config_path}")
+            from ..audit import get_audit_logger
+            audit = get_audit_logger()
+            if audit:
+                audit.log_security_event("config_integrity_fail", f"path={config_path}")
             return
 
         try:
@@ -94,6 +115,34 @@ class MCPManager:
             statuses.append(client.get_status().to_dict())
         return statuses
 
+    async def _execute_external_call(self, call: dict) -> dict:
+        """Execute a single external tool call."""
+        tool_name = call.get("function", {}).get("name", "")
+        if "__" in tool_name:
+            server_name, actual_tool = tool_name.split("__", 1)
+        else:
+            server_name, actual_tool = "", tool_name
+
+        client = self._external_clients.get(server_name)
+        if client is None:
+            return {
+                "role": "tool",
+                "tool_call_id": call.get("id", ""),
+                "content": f"Error: MCP server '{server_name}' not connected",
+            }
+
+        arguments = call.get("function", {}).get("arguments", {})
+        if isinstance(arguments, str):
+            try:
+                import json
+
+                arguments = json.loads(arguments)
+            except Exception:
+                arguments = {}
+
+        result = await client.call_tool(actual_tool, arguments)
+        return result.to_message(tool_call_id=call.get("id", ""))
+
     async def execute(self, calls: list[dict]) -> list[dict]:
         if not self.enabled:
             return []
@@ -112,43 +161,21 @@ class MCPManager:
             else:
                 builtin_calls.append(call)
 
-        results = []
-
-        # Execute built-in tools (synchronous)
+        # Execute both built-in and external tools in parallel
+        tasks = []
         if builtin_calls:
-            results.extend(self.executor.handle_calls(builtin_calls))
+            tasks.append(self.executor.handle_calls_async(builtin_calls))
+        if external_calls:
+            tasks.append(asyncio.gather(*[self._execute_external_call(c) for c in external_calls]))
 
-        # Execute external tools (asynchronous)
-        for call in external_calls:
-            tool_name = call.get("function", {}).get("name", "")
-            # Parse server__tool namespace
-            if "__" in tool_name:
-                server_name, actual_tool = tool_name.split("__", 1)
-            else:
-                server_name, actual_tool = "", tool_name
-
-            client = self._external_clients.get(server_name)
-            if client is None:
-                results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.get("id", ""),
-                        "content": f"Error: MCP server '{server_name}' not connected",
-                    }
-                )
+        results = []
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        for batch in gathered:
+            if isinstance(batch, Exception):
+                logger.error("Tool execution batch failed: %s", batch)
                 continue
-
-            arguments = call.get("function", {}).get("arguments", {})
-            if isinstance(arguments, str):
-                try:
-                    import json
-
-                    arguments = json.loads(arguments)
-                except Exception:
-                    arguments = {}
-
-            result = await client.call_tool(actual_tool, arguments)
-            results.append(result.to_message(tool_call_id=call.get("id", "")))
+            if isinstance(batch, list):
+                results.extend(batch)
 
         return results
 
