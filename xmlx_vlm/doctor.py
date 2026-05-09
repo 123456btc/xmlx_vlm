@@ -118,11 +118,10 @@ def check_apc() -> Tuple[bool, List[str]]:
     return ok, lines
 
 
-def check_ports() -> Tuple[bool, List[str]]:
-    """Check whether the default server port is occupied and by whom."""
+def check_ports(port: int) -> Tuple[bool, List[str]]:
+    """Check whether the given port is occupied and by whom."""
     lines: List[str] = []
     ok = True
-    port = int(os.environ.get("XMLX_VLM_PORT", "8080"))
     try:
         import socket
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -134,6 +133,8 @@ def check_ports() -> Tuple[bool, List[str]]:
 
         # Port is occupied — try to identify the process
         proc_name = None
+        proc_args = ""
+        found_pid = ""
         try:
             result = subprocess.run(
                 ["lsof", "-ti", f":{port}"],
@@ -147,24 +148,39 @@ def check_ports() -> Tuple[bool, List[str]]:
                     pid = pid.strip()
                     if not pid:
                         continue
+                    # Get command name
                     proc_check = subprocess.run(
                         ["ps", "-p", pid, "-o", "comm="],
                         capture_output=True,
                         text=True,
                         timeout=2,
                     )
+                    # Get full command line args
+                    args_check = subprocess.run(
+                        ["ps", "-p", pid, "-o", "args="],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                    )
                     if proc_check.returncode == 0:
                         proc_name = proc_check.stdout.strip()
+                        proc_args = args_check.stdout.strip() if args_check.returncode == 0 else ""
+                        found_pid = pid
                         break
         except Exception:
             pass
 
-        if proc_name and "python" in proc_name.lower():
-            lines.append(_ok(f"Server running on port {port} (pid={pid})"))
+        is_xmlx_vlm = (
+            proc_name
+            and "python" in proc_name.lower()
+            and ("xmlx_vlm" in proc_args or "xmlx-vlm" in proc_args or "service.sh" in proc_args)
+        )
+        if is_xmlx_vlm:
+            lines.append(_ok(f"xmlx-vlm running on port {port} (pid={found_pid})"))
         elif proc_name:
-            lines.append(_warn(f"Port {port} occupied by {proc_name} (not xmlx-vlm)"))
+            lines.append(_warn(f"Port {port} occupied by {proc_name} (not xmlx-vlm, pid={found_pid})"))
         else:
-            lines.append(_ok(f"Server running on port {port}"))
+            lines.append(_warn(f"Port {port} is occupied by an unknown process"))
     except Exception as e:
         lines.append(_warn(f"Could not check port {port}: {e}"))
     return ok, lines
@@ -198,7 +214,7 @@ def check_service() -> Tuple[bool, List[str]]:
     return ok, lines
 
 
-def run_diagnostics() -> bool:
+def run_diagnostics(port: int = 8080) -> bool:
     """Run all diagnostic checks and print a report."""
     print("=" * 60)
     print(" XMLX-VLM Doctor")
@@ -210,7 +226,7 @@ def run_diagnostics() -> bool:
         ("MLX Runtime", check_mlx),
         ("Model Cache", check_models),
         ("APC Cache", check_apc),
-        ("Network", check_ports),
+        ("Network", lambda: check_ports(port)),
         ("Service", check_service),
     ]
     for title, fn in checks:
@@ -232,8 +248,14 @@ def run_diagnostics() -> bool:
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="XMLX-VLM system diagnostics")
-    parser.parse_args()
-    ok = run_diagnostics()
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("XMLX_VLM_PORT", "8080")),
+        help="Server port to check (default: 8080 or XMLX_VLM_PORT env)",
+    )
+    args = parser.parse_args()
+    ok = run_diagnostics(port=args.port)
     sys.exit(0 if ok else 1)
 
 
