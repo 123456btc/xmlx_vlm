@@ -322,8 +322,20 @@ def test_from_env_respects_opt_in_and_disk_config(tmp_path, monkeypatch):
 
     monkeypatch.delenv("APC_ENABLED", raising=False)
     monkeypatch.delenv("APC_DISK_PATH", raising=False)
+    # APC is now enabled by default
+    manager = from_env()
+    assert manager is not None
+    assert manager.disk is not None
+    manager.close()
+    default_dir = Path.home() / ".cache" / "xmlx_vlm" / "apc"
+    if default_dir.exists():
+        shutil.rmtree(default_dir)
+
+    # Explicitly disable APC
+    monkeypatch.setenv("APC_ENABLED", "0")
     assert from_env() is None
 
+    # Re-enable with custom block size
     monkeypatch.setenv("APC_ENABLED", "1")
     monkeypatch.setenv("APC_BLOCK_SIZE", "8")
     monkeypatch.setenv("APC_NUM_BLOCKS", "3")
@@ -332,11 +344,8 @@ def test_from_env_respects_opt_in_and_disk_config(tmp_path, monkeypatch):
     assert manager is not None
     assert manager.block_size == 8
     assert manager.num_blocks == 3
-    # APC_DISK_PATH now defaults to ~/.cache/xmlx_vlm/apc when not set
     assert manager.disk is not None
     manager.close()
-    # Clean up the default directory created by the test
-    default_dir = Path.home() / ".cache" / "xmlx_vlm" / "apc"
     if default_dir.exists():
         shutil.rmtree(default_dir)
 

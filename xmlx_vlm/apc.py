@@ -3711,7 +3711,7 @@ def from_env(model_namespace: Optional[str] = None) -> Optional[APCManager]:
     The disk read path defaults to direct file reads so restored K/V tensors
     are MLX-owned buffers rather than mmap-backed safetensors views.
     """
-    if os.environ.get("APC_ENABLED", "0") not in ("1", "true", "True", "yes"):
+    if os.environ.get("APC_ENABLED", "1").lower() in ("0", "false", "no", "off"):
         return None
     block_size = int(os.environ.get("APC_BLOCK_SIZE", DEFAULT_BLOCK_SIZE))
     num_blocks = int(os.environ.get("APC_NUM_BLOCKS", DEFAULT_NUM_BLOCKS))

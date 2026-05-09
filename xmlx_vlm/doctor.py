@@ -109,12 +109,12 @@ def check_apc() -> Tuple[bool, List[str]]:
     """Check APC disk cache configuration."""
     lines: List[str] = []
     ok = True
-    apc_enabled = os.environ.get("APC_ENABLED", "")
+    apc_enabled = os.environ.get("APC_ENABLED", "1")
     apc_path = os.environ.get("APC_DISK_PATH", os.path.expanduser("~/.cache/xmlx_vlm/apc"))
-    if apc_enabled in ("1", "true", "True", "yes"):
-        lines.append(_ok(f"APC enabled (disk={apc_path})"))
+    if apc_enabled.lower() in ("0", "false", "no", "off"):
+        lines.append(_warn("APC disabled (unset APC_ENABLED or set to 1 to enable)"))
     else:
-        lines.append(_warn("APC not enabled (set APC_ENABLED=1 to enable prefix caching)"))
+        lines.append(_ok(f"APC enabled (disk={apc_path})"))
     return ok, lines
 
 
