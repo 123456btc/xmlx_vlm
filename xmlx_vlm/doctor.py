@@ -110,11 +110,11 @@ def check_apc() -> Tuple[bool, List[str]]:
     lines: List[str] = []
     ok = True
     apc_enabled = os.environ.get("APC_ENABLED", "")
-    apc_path = os.environ.get("APC_DISK_PATH", "")
-    if apc_enabled or apc_path:
-        lines.append(_ok(f"APC enabled (disk={apc_path or 'not set'})"))
+    apc_path = os.environ.get("APC_DISK_PATH", os.path.expanduser("~/.cache/xmlx_vlm/apc"))
+    if apc_enabled in ("1", "true", "True", "yes"):
+        lines.append(_ok(f"APC enabled (disk={apc_path})"))
     else:
-        lines.append(_warn("APC disk cache not configured (set APC_DISK_PATH to enable)"))
+        lines.append(_warn("APC not enabled (set APC_ENABLED=1 to enable prefix caching)"))
     return ok, lines
 
 

@@ -3718,6 +3718,8 @@ def from_env(model_namespace: Optional[str] = None) -> Optional[APCManager]:
 
     disk: Optional[DiskBlockStore] = None
     disk_path = os.environ.get("APC_DISK_PATH")
+    if not disk_path:
+        disk_path = os.path.expanduser("~/.cache/xmlx_vlm/apc")
     if disk_path:
         ns = model_namespace or os.environ.get("APC_DISK_NAMESPACE", "default")
         max_gb = float(os.environ.get("APC_DISK_MAX_GB", 0))

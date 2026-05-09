@@ -317,6 +317,9 @@ def test_apc_max_pool_tensors_keeps_disk_persistence(tmp_path, monkeypatch):
 
 
 def test_from_env_respects_opt_in_and_disk_config(tmp_path, monkeypatch):
+    import shutil
+    from pathlib import Path
+
     monkeypatch.delenv("APC_ENABLED", raising=False)
     monkeypatch.delenv("APC_DISK_PATH", raising=False)
     assert from_env() is None
@@ -329,8 +332,13 @@ def test_from_env_respects_opt_in_and_disk_config(tmp_path, monkeypatch):
     assert manager is not None
     assert manager.block_size == 8
     assert manager.num_blocks == 3
-    assert manager.disk is None
+    # APC_DISK_PATH now defaults to ~/.cache/xmlx_vlm/apc when not set
+    assert manager.disk is not None
     manager.close()
+    # Clean up the default directory created by the test
+    default_dir = Path.home() / ".cache" / "xmlx_vlm" / "apc"
+    if default_dir.exists():
+        shutil.rmtree(default_dir)
 
     monkeypatch.setenv("APC_DISK_PATH", str(tmp_path))
     monkeypatch.setenv("APC_DISK_MAX_GB", "0.001")
