@@ -119,7 +119,7 @@ def check_apc() -> Tuple[bool, List[str]]:
 
 
 def check_ports() -> Tuple[bool, List[str]]:
-    """Check whether the default server port is free."""
+    """Check whether the default server port is occupied and by whom."""
     lines: List[str] = []
     ok = True
     port = int(os.environ.get("XMLX_VLM_PORT", "8080"))
@@ -128,10 +128,43 @@ def check_ports() -> Tuple[bool, List[str]]:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)
             result = s.connect_ex(("127.0.0.1", port))
-            if result == 0:
-                lines.append(_warn(f"Port {port} is already in use (server may be running)"))
-            else:
+            if result != 0:
                 lines.append(_ok(f"Port {port} is free"))
+                return ok, lines
+
+        # Port is occupied — try to identify the process
+        proc_name = None
+        try:
+            result = subprocess.run(
+                ["lsof", "-ti", f":{port}"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split("\n")
+                for pid in pids:
+                    pid = pid.strip()
+                    if not pid:
+                        continue
+                    proc_check = subprocess.run(
+                        ["ps", "-p", pid, "-o", "comm="],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                    )
+                    if proc_check.returncode == 0:
+                        proc_name = proc_check.stdout.strip()
+                        break
+        except Exception:
+            pass
+
+        if proc_name and "python" in proc_name.lower():
+            lines.append(_ok(f"Server running on port {port} (pid={pid})"))
+        elif proc_name:
+            lines.append(_warn(f"Port {port} occupied by {proc_name} (not xmlx-vlm)"))
+        else:
+            lines.append(_ok(f"Server running on port {port}"))
     except Exception as e:
         lines.append(_warn(f"Could not check port {port}: {e}"))
     return ok, lines
@@ -141,7 +174,11 @@ def check_service() -> Tuple[bool, List[str]]:
     """Check whether service.sh reports a running server."""
     lines: List[str] = []
     ok = True
-    script = Path(__file__).with_name("service.sh")
+    # service.sh lives in the project root, one level above this package
+    script = Path(__file__).resolve().parent.parent / "service.sh"
+    if not script.exists():
+        # Fallback: check current working directory
+        script = Path.cwd() / "service.sh"
     if not script.exists():
         lines.append(_warn("service.sh not found — service status check skipped"))
         return ok, lines
