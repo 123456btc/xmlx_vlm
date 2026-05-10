@@ -410,6 +410,23 @@ XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS=1 \
 
 > **Tip**: Agent clients often send 10k–30k tokens for the initial system prompt. With `APC_DISK_PATH`, this prefix is written to SSD during the first prefill and restored instantly on subsequent sessions — even after a server restart.
 
+#### ds4-style Full Session Checkpointing (new)
+
+Inspired by [antirez/ds4](https://github.com/antirez/ds4)'s disk KV cache design, XMLX-VLM now saves the **full conversation KV state** to SSD at the end of every generation — not just the input prefix. This means:
+
+- **Multi-turn conversations skip the entire re-prefill**, including all previous assistant responses, not just the system prompt.
+- Each saved checkpoint stores the KV tensors **plus** the next-token log-softmax vector (ds4's "logits snapshot"), enabling future optimizations like single-step-skip on restore.
+- The checkpoint key is the full token sequence hash (input + output), so multi-client workloads don't collide.
+
+Two checkpoints are written per generation turn when `APC_DISK_PATH` is set and `APC_ENABLED=1`:
+
+| Checkpoint | Token coverage | Written at |
+|---|---|---|
+| **prefix** | input tokens only | after prefill (n=0) |
+| **session** | input + all generated tokens | after generation ends |
+
+The session checkpoint is what turns the SSD into a "first-class KV citizen" — subsequent turns in the same conversation find a longer cached prefix and skip far more computation. On MLA-compressed models (Kimi K25, DeepSeek VL V2) the KV is small enough that even long-context sessions fit comfortably on SSD.
+
 ---
 
 ## 🛠 Operations & Observability

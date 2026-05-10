@@ -1592,7 +1592,7 @@ def stream_generate(
     # PromptCacheState didn't already produce a hit.
     if apc_manager is not None and reused_prefix_len == 0:
         if apc_mode == "exact":
-            exact_prompt_cache, exact_prefix_len = apc_manager.lookup_exact_cache(
+            exact_prompt_cache, exact_prefix_len, _exact_logits = apc_manager.lookup_exact_cache(
                 full_input_ids_list,
                 extra_hash=apc_extra_hash,
             )
@@ -1619,7 +1619,7 @@ def stream_generate(
             exact_prompt_cache = None
             exact_prefix_len = 0
             if prefix_len < input_ids.shape[1]:
-                exact_prompt_cache, exact_prefix_len = apc_manager.lookup_exact_cache(
+                exact_prompt_cache, exact_prefix_len, _exact_logits = apc_manager.lookup_exact_cache(
                     full_input_ids_list,
                     extra_hash=apc_extra_hash,
                     min_prefix_tokens=prefix_len,
@@ -1759,10 +1759,15 @@ def stream_generate(
                     and reused_prefix_len == 0
                 ):
                     try:
+                        # Save KV for the full input prefix together with the
+                        # first-token log-softmax (ds4-style logits snapshot).
+                        # ``logprobs`` here is the full vocab-size log-softmax
+                        # vector produced by generate_step right after prefill.
                         apc_manager.store_exact_cache(
                             full_input_ids_list,
                             tracked_cache,
                             extra_hash=apc_extra_hash,
+                            logits=logprobs,
                         )
                     except Exception as e:
                         logger.warning("APC exact-cache store failed: %s", e)
@@ -1812,6 +1817,33 @@ def stream_generate(
                 t.item() if hasattr(t, "item") else t for t in generated_tokens
             ]
             prompt_cache_state.update(all_ids, tracked_cache)
+
+        # ── ds4-style post-generation session save ──────────────────────────
+        # Save the full KV state (input + all generated tokens) so the NEXT
+        # request in the same conversation can restore from here instead of
+        # re-prefilling the entire context.  This is the critical gap vs ds4:
+        # the mid-generation APC store (n==0 above) only covers the input
+        # prefix; this one covers input + assistant response.
+        #
+        # Key: full_input_ids_list + generated_tokens
+        # Value: tracked_cache (KV populated for every one of those tokens)
+        # Logits: the last token's log-softmax (distribution for the *next*
+        #         token after this session ends, e.g. start of next user turn).
+        if apc_manager is not None and apc_mode == "exact" and generated_tokens:
+            try:
+                if all_ids is None:
+                    all_ids = full_input_ids_list + [
+                        t.item() if hasattr(t, "item") else t
+                        for t in generated_tokens
+                    ]
+                apc_manager.store_exact_cache(
+                    all_ids,
+                    tracked_cache,
+                    extra_hash=apc_extra_hash,
+                    logits=logprobs,  # last-token log-softmax from the loop
+                )
+            except Exception as e:
+                logger.warning("APC post-gen session save failed: %s", e)
 
         # APC: harvest new blocks from the post-generation KV state.
         if apc_manager is not None and apc_mode == "block":
@@ -3122,7 +3154,7 @@ class BatchGenerator:
         extra_hash = self._apc_extra_hash(prompt_kwargs or {})
         apc_mode = getattr(self, "apc_mode", "block")
         if apc_mode == "exact":
-            exact_cache, exact_prefix_len = self.apc_manager.lookup_exact_cache(
+            exact_cache, exact_prefix_len, _exact_logits = self.apc_manager.lookup_exact_cache(
                 ids_list,
                 extra_hash=extra_hash,
             )
@@ -3150,7 +3182,7 @@ class BatchGenerator:
         exact_cache = None
         exact_prefix_len = 0
         if prefix_len < len(ids_list):
-            exact_cache, exact_prefix_len = self.apc_manager.lookup_exact_cache(
+            exact_cache, exact_prefix_len, _exact_logits = self.apc_manager.lookup_exact_cache(
                 ids_list,
                 extra_hash=extra_hash,
                 min_prefix_tokens=prefix_len,

@@ -62,6 +62,21 @@ DEFAULT_BLOCK_SIZE = 16
 DEFAULT_NUM_BLOCKS = 2048
 SEED_PARENT_HASH = 0
 
+# ── On-disk format versioning ─────────────────────────────────────────────────
+# Bump this integer whenever the binary layout of an APC shard changes in a
+# backward-incompatible way (e.g. tensor key renames, dtype changes, new
+# required fields that older code would silently misread).
+#
+# Compatibility policy:
+#   • Loaders reject shards whose schema_version > APC_DISK_SCHEMA_VERSION
+#     (written by a newer build; we don't know the new layout).
+#   • Loaders also reject shards whose schema_version < APC_DISK_SCHEMA_VERSION
+#     (old layout; rather than guess, we discard and re-prefill — cheap and
+#     correct).  Cached shards are automatically replaced on next write.
+#   • Shards written without a schema_version field at all (pre-versioning
+#     builds) are treated as version "0" and rejected, forcing a clean rebuild.
+APC_DISK_SCHEMA_VERSION = "1"
+
 
 def _hash_use_sha256() -> bool:
     return os.environ.get("APC_HASH", "fast").lower() == "sha256"
@@ -456,12 +471,21 @@ class APCBlock:
 
 @dataclass
 class APCExactCacheEntry:
-    """Exact-prefix prompt-cache snapshot for custom cache layouts."""
+    """Exact-prefix prompt-cache snapshot for custom cache layouts.
+
+    ``logits`` is the full log-softmax vector (vocab_size,) for the token
+    *immediately after* the cached prefix — i.e. the distribution that
+    generated the first output token.  Saving it allows a future request
+    whose input is an exact extension of this prefix to skip one model
+    forward pass by reusing the pre-computed distribution.  ``None`` when
+    the snapshot was captured without logits (e.g. from an older index).
+    """
 
     token_ids: Tuple[int, ...]
     extra_hash: int
     prompt_cache: List[Any]
     last_used: float
+    logits: Optional[mx.array] = None
 
 
 @dataclass(frozen=True)
@@ -506,6 +530,9 @@ class _DiskExactCacheSnapshot:
     token_ids: Tuple[int, ...]
     extra_hash: int
     prompt_cache: List[Any]
+    # Full log-softmax vector (vocab_size,) for the first token *after* the
+    # cached prefix, captured at save time.  None when not available.
+    logits: Optional[mx.array] = None
 
 
 @dataclass
@@ -1199,7 +1226,7 @@ class DiskBlockStore:
         *,
         wait_in_flight_ms: float = 0.0,
         min_capacity_tokens: Optional[int] = None,
-    ) -> Optional[Tuple[Tuple[int, ...], int, List[Any]]]:
+    ) -> Optional[Tuple[Tuple[int, ...], int, List[Any], Optional[mx.array]]]:
         with self._index_lock:
             path = self._exact_index.get(cache_hash)
         if path is None:
@@ -1220,12 +1247,30 @@ class DiskBlockStore:
         path: Path,
         *,
         min_capacity_tokens: Optional[int],
-    ) -> Optional[Tuple[Tuple[int, ...], int, List[Any]]]:
+    ) -> Optional[Tuple[Tuple[int, ...], int, List[Any], Optional[mx.array]]]:
+        """Load an exact-cache file from disk.
+
+        Returns ``(token_ids, extra_hash, prompt_cache, logits)`` where
+        ``logits`` is the saved log-softmax vector (vocab_size,) for the next
+        token, or ``None`` when the snapshot was written without logits.
+        """
         parsed = self._open_shard_header(path)
         if parsed is None:
             return None
         tensor_entries, metadata, data_start = parsed
         if metadata.get("layout") != "exact_cache_v1":
+            return None
+        # Schema version guard — reject shards from a different build to prevent
+        # silent tensor misreads.  Missing version field → treated as "0" (pre-
+        # versioning build) → rejected.  The shard will be overwritten on the
+        # next store_exact_cache call, so this is self-healing.
+        shard_ver = metadata.get("schema_version", "0")
+        if shard_ver != APC_DISK_SCHEMA_VERSION:
+            logger.debug(
+                "APC disk: rejecting exact-cache shard %s — schema_version %r "
+                "!= expected %r; will re-prefill and overwrite",
+                path.name, shard_ver, APC_DISK_SCHEMA_VERSION,
+            )
             return None
         try:
             token_ids = tuple(
@@ -1253,13 +1298,25 @@ class DiskBlockStore:
             if loaded is None:
                 return None
             prompt_cache.append(loaded)
+
+        # ---- ds4-style next-token logits restore ----
+        logits_arr: Optional[mx.array] = None
+        if metadata.get("has_logits") == "1":
+            le = tensor_entries.get("next_logits")
+            if le is not None:
+                raw = _read_safetensors_tensor(path, data_start, le)
+                if raw is not None:
+                    # Saved as (1, vocab_size); squeeze to (vocab_size,)
+                    logits_arr = raw.reshape(-1)
+                    eval_targets.append(logits_arr)
+
         if eval_targets:
             mx.eval(eval_targets)
         try:
             os.utime(path, None)
         except OSError:
             pass
-        return token_ids, extra_hash, prompt_cache
+        return token_ids, extra_hash, prompt_cache, logits_arr
 
     def _load_exact_cache_entry(
         self,
@@ -1563,6 +1620,15 @@ class DiskBlockStore:
                 shard_path, tensor_entries, file_metadata, data_start, block_indices
             )
         if layout not in ("layer_major_v1", "layer_major_v2"):
+            return None
+        # Schema version guard (same policy as exact-cache)
+        shard_ver = file_metadata.get("schema_version", "0")
+        if shard_ver != APC_DISK_SCHEMA_VERSION:
+            logger.debug(
+                "APC disk: rejecting layer-major shard %s — schema_version %r "
+                "!= expected %r; will re-prefill",
+                shard_path.name, shard_ver, APC_DISK_SCHEMA_VERSION,
+            )
             return None
         try:
             num_layers = int(file_metadata.get("num_layers", "0"))
@@ -2265,11 +2331,17 @@ class DiskBlockStore:
         token_ids: Sequence[int],
         extra_hash: int,
         prompt_cache: Sequence[Any],
+        logits: Optional[mx.array] = None,
     ) -> None:
         """Schedule an exact prompt-cache snapshot write.
 
         Exact snapshots are used for custom cache layouts that cannot be
         reconstructed from independently concatenated K/V blocks.
+
+        ``logits`` is the optional full log-softmax vector (vocab_size,) for
+        the first token after the cached prefix.  When provided it is stored
+        alongside the KV tensors and returned by ``load_exact_cache`` so
+        callers can skip one decode step on restore.
         """
         token_tuple = tuple(int(t) for t in token_ids)
         if not token_tuple or not prompt_cache:
@@ -2279,6 +2351,7 @@ class DiskBlockStore:
             token_ids=token_tuple,
             extra_hash=int(extra_hash),
             prompt_cache=list(prompt_cache),
+            logits=logits,
         )
         self._enqueue_exact_snapshot(snapshot)
 
@@ -2516,6 +2589,7 @@ class DiskBlockStore:
     ) -> List[int]:
         metadata: dict[str, str] = {
             "layout": "exact_cache_v1",
+            "schema_version": APC_DISK_SCHEMA_VERSION,
             "cache_hash": str(int(snapshot.cache_hash)),
             "extra_hash": str(int(snapshot.extra_hash)),
             "token_ids": ",".join(str(int(t)) for t in snapshot.token_ids),
@@ -2528,6 +2602,20 @@ class DiskBlockStore:
                 raise ValueError(f"unsupported exact-cache entry at index {i}")
         if not arrays:
             return []
+
+        # ---- ds4-style next-token logits snapshot ----
+        # Store the log-softmax vector for the first token after this prefix
+        # so that a future restore can skip one decode step.
+        if snapshot.logits is not None:
+            try:
+                lgt = snapshot.logits
+                if isinstance(lgt, mx.array):
+                    lgt = lgt.reshape(-1)           # ensure 1-D (vocab_size,)
+                    arrays["next_logits"] = lgt[None]  # save as (1, vocab_size)
+                    metadata["has_logits"] = "1"
+                    metadata["logits_vocab_size"] = str(int(lgt.shape[0]))
+            except Exception as _le:
+                logger.debug("APC disk: skipping logits save: %s", _le)
 
         mx.eval(list(arrays.values()))
         tag = f"{os.getpid()}-{threading.get_ident()}"
@@ -2555,6 +2643,7 @@ class DiskBlockStore:
             raise ValueError("layer-major disk snapshot has mismatched K/V layers")
 
         metadata: dict[str, str] = {}
+        metadata["schema_version"] = APC_DISK_SCHEMA_VERSION
         metadata["store_id"] = snapshot.store_id
         metadata["segment_index"] = str(int(snapshot.segment_index))
         metadata["segment_count"] = str(int(snapshot.segment_count))
@@ -2595,7 +2684,7 @@ class DiskBlockStore:
         path: Path,
         blocks: List[_DiskBlockSnapshot],
     ) -> List[int]:
-        metadata: dict[str, str] = {}
+        metadata: dict[str, str] = {"schema_version": APC_DISK_SCHEMA_VERSION}
         num_layers = len(blocks[0].keys) if blocks and blocks[0].keys else 0
         for idx, b in enumerate(blocks):
             if b.keys is None or b.values is None:
@@ -2841,24 +2930,31 @@ class APCManager:
         extra_hash: int = 0,
         max_prefix_tokens: Optional[int] = None,
         min_prefix_tokens: int = 0,
-    ) -> Tuple[Optional[List[Any]], int]:
+    ) -> Tuple[Optional[List[Any]], int, Optional[mx.array]]:
         """Return an exact-prefix prompt-cache snapshot for custom caches.
 
         Mixed architectures such as Nemotron-H use recurrent SSM state in
         addition to attention KV. That state is not block-concatenable, so the
         safe reuse unit is an exact prompt-cache snapshot at a prefix boundary.
+
+        Returns ``(prompt_cache, prefix_len, logits)`` where ``logits`` is the
+        saved log-softmax vector (vocab_size,) for the first token after the
+        cached prefix (ds4-style session checkpoint), or ``None`` when not
+        available.  Callers that previously unpacked 2-tuples should add a
+        third ``_`` or ``logits`` binding.
         """
         disk = self.disk
         if self._exact_cache_max <= 0 and disk is None:
-            return None, 0
+            return None, 0, None
         token_tuple = tuple(int(t) for t in token_ids)
         max_len = len(token_tuple) - 1
         if max_prefix_tokens is not None and max_prefix_tokens > 0:
             max_len = min(max_len, int(max_prefix_tokens))
         if max_len <= min_prefix_tokens:
-            return None, 0
+            return None, 0, None
 
         source_cache: Optional[List[Any]] = None
+        source_logits: Optional[mx.array] = None
         prefix_len = 0
         with self.lock:
             best_key: Optional[int] = None
@@ -2883,6 +2979,7 @@ class APCManager:
                     best_entry.last_used = time.time()
                     prefix_len = len(best_entry.token_ids)
                     source_cache = best_entry.prompt_cache
+                    source_logits = best_entry.logits
 
         can_try_disk = disk is not None and prefix_len < max_len
         if can_try_disk and self._disk_min_free_ram_bytes > 0:
@@ -2909,7 +3006,7 @@ class APCManager:
                     min_capacity_tokens=len(token_tuple) + 1,
                 )
                 if loaded is not None:
-                    stored_tokens, stored_extra_hash, prompt_cache = loaded
+                    stored_tokens, stored_extra_hash, prompt_cache, disk_logits = loaded
                     if (
                         stored_extra_hash == extra_hash
                         and len(stored_tokens) == disk_prefix_len
@@ -2924,21 +3021,21 @@ class APCManager:
                             self.stats.disk_hits += 1
                             self.stats.hits += 1
                             self.stats.matched_tokens += disk_prefix_len
-                        return prompt_cache, disk_prefix_len
+                        return prompt_cache, disk_prefix_len, disk_logits
 
         if source_cache is None:
-            return None, 0
+            return None, 0, None
         prompt_cache = _clone_prompt_cache_for_apc(
             source_cache,
             min_capacity_tokens=len(token_tuple) + 1,
         )
         if prompt_cache is None:
-            return None, 0
+            return None, 0, None
         with self.lock:
             self.stats.exact_hits += 1
             self.stats.hits += 1
             self.stats.matched_tokens += prefix_len
-        return prompt_cache, prefix_len
+        return prompt_cache, prefix_len, source_logits
 
     def store_exact_cache(
         self,
@@ -2946,8 +3043,14 @@ class APCManager:
         prompt_cache: Sequence[Any],
         *,
         extra_hash: int = 0,
+        logits: Optional[mx.array] = None,
     ) -> bool:
-        """Store a full prompt-cache snapshot for exact-prefix reuse."""
+        """Store a full prompt-cache snapshot for exact-prefix reuse.
+
+        ``logits`` is the optional log-softmax vector (vocab_size,) for the
+        first token *after* this prefix — the ds4-style session-checkpoint
+        logits that allow skipping one decode step on restore.
+        """
         if (self._exact_cache_max <= 0 and self.disk is None) or not token_ids:
             return False
         token_tuple = tuple(int(t) for t in token_ids)
@@ -2963,6 +3066,7 @@ class APCManager:
                     extra_hash=int(extra_hash),
                     prompt_cache=copied,
                     last_used=time.time(),
+                    logits=logits,
                 )
                 self._exact_cache.move_to_end(key)
                 while len(self._exact_cache) > self._exact_cache_max:
@@ -2970,7 +3074,9 @@ class APCManager:
                 stored = True
         if self.disk is not None:
             try:
-                self.disk.save_exact_cache(key, token_tuple, extra_hash, copied)
+                self.disk.save_exact_cache(
+                    key, token_tuple, extra_hash, copied, logits=logits
+                )
                 with self.lock:
                     self.stats.disk_writes += 1
                 stored = True

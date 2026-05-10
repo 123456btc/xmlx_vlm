@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from queue import Empty as QueueEmpty
+from queue import Full as QueueFull
 from queue import Queue
 from threading import Event, Lock, Thread
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple, Union
@@ -124,6 +125,23 @@ DEFAULT_TOKEN_QUEUE_TIMEOUT = 600.0
 DEFAULT_FIRST_TOKEN_TIMEOUT = None  # No timeout for first token (prefill) by default
 DEFAULT_ENABLE_THINKING = False
 DEFAULT_ENABLE_TOOL_LOGITS_BIAS = False
+# Maximum number of pending requests in the ResponseGenerator queue.
+# When the queue is full the server returns HTTP 503 rather than OOM-crashing.
+# Override via XMLX_VLM_MAX_QUEUE_DEPTH or --max-queue-depth.
+DEFAULT_MAX_QUEUE_DEPTH = 64
+# When a client request omits thinking_budget/reasoning_effort, this server-wide
+# default caps thinking to avoid indefinitely-long reasoning that hangs agents
+# (e.g. Pi.dev connected to many tool rounds).  Set to None to disable.
+#
+# Tuned for financial-quant / factor-research / agent-loop workloads:
+#   • Multi-step math derivations and factor-tree construction need long chains
+#   • Quant code generation benefits from thorough pre-flight reasoning
+#   • Agent loop: each tool-call round re-reasons over results — budget must
+#     cover a full analysis pass without cutting off mid-derivation
+#   • 16 384 tokens ≈ 12 000 words of CoT — covers even deep Markowitz /
+#     Kelly / alpha-decay derivations; model still exits early if it finishes
+#     naturally, so short tasks are unaffected
+DEFAULT_THINKING_BUDGET_CAP = 16384  # tokens; override via XMLX_DEFAULT_THINKING_BUDGET
 
 
 def _get_speculative_rounds_batch(draft_kind: str):
@@ -206,6 +224,44 @@ def get_server_enable_thinking():
     if raw is None:
         return DEFAULT_ENABLE_THINKING
     return raw.lower() in ("1", "true", "yes", "on")
+
+
+def get_server_default_thinking_budget() -> Optional[int]:
+    """Return the server-wide default thinking-token cap.
+
+    Checked in order:
+    1. ``XMLX_DEFAULT_THINKING_BUDGET`` env-var (int or "off"/"none"/"disabled" to disable)
+    2. ``DEFAULT_THINKING_BUDGET_CAP`` module constant
+
+    Returns ``None`` when the cap is explicitly disabled.
+    """
+    raw = os.environ.get("XMLX_DEFAULT_THINKING_BUDGET")
+    if raw is not None:
+        raw = raw.strip()
+        if raw.lower() in ("off", "none", "disabled", "0", ""):
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            pass  # fall through to default
+    return DEFAULT_THINKING_BUDGET_CAP if DEFAULT_THINKING_BUDGET_CAP else None
+
+
+def get_server_max_queue_depth() -> int:
+    """Return the maximum number of pending requests in the ResponseGenerator queue.
+
+    Override via ``XMLX_VLM_MAX_QUEUE_DEPTH`` env var or ``--max-queue-depth``
+    CLI flag.  Set to 0 to make the queue unbounded (not recommended in
+    production).
+    """
+    raw = os.environ.get("XMLX_VLM_MAX_QUEUE_DEPTH", "")
+    if raw.strip():
+        try:
+            v = int(raw.strip())
+            return max(0, v)
+        except ValueError:
+            pass
+    return DEFAULT_MAX_QUEUE_DEPTH
 
 
 def get_quantized_kv_bits(model: str):
@@ -381,7 +437,9 @@ class ResponseGenerator:
         self.top_logprobs_k = top_logprobs_k
         self.apc_manager = apc_manager
         self.tokenizer = None
-        self.requests: Queue = Queue()
+        _depth = get_server_max_queue_depth()
+        # maxsize=0 → unbounded (Queue semantics); >0 → bounded with backpressure
+        self.requests: Queue = Queue(maxsize=_depth)
         self._stop = False
         self._ready = Event()
         self._load_error: Optional[Exception] = None
@@ -478,7 +536,14 @@ class ResponseGenerator:
             else len(raw_inputs["input_ids"])
         )
 
-        self.requests.put((rqueue, raw_inputs, prompt_tokens, args, images))
+        try:
+            self.requests.put_nowait((rqueue, raw_inputs, prompt_tokens, args, images))
+        except QueueFull:
+            depth = self.requests.maxsize
+            raise RuntimeError(
+                f"Server request queue is full ({depth} pending requests). "
+                "Try again later, or increase XMLX_VLM_MAX_QUEUE_DEPTH."
+            )
 
         # Block until the GPU thread sends back the context
         ctx = rqueue.get()
@@ -1029,20 +1094,51 @@ def suppress_tool_call_content(
     in_tool_call: bool,
     tc_start: Optional[str],
     delta_content: Optional[str],
+    tc_end: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Suppress tool-call markup from streamed delta.content.
 
-    Returns updated (in_tool_call, delta_content).
+    Returns updated ``(in_tool_call, delta_content)``.
+
+    Tracks *both* ``tc_start`` and ``tc_end`` so that ``in_tool_call`` reverts
+    to ``False`` once the closing delimiter has been consumed.  Without this fix
+    ``in_tool_call`` stays ``True`` for the remainder of the request, silently
+    dropping all content after the first tool call — visible as the Pi.dev
+    "⠋ Working…" spinner that never resolves in long agent loops.
+
+    Multiple tool calls in one reply are handled correctly: after each
+    ``tc_end`` the state resets, and a subsequent ``tc_start`` re-enters the
+    suppression window.
     """
     if not tc_start:
         return in_tool_call, delta_content
+
+    def _after_last_end() -> bool:
+        """True when the last tc_end in full_output comes after the last tc_start."""
+        if not tc_end:
+            return False
+        last_end = full_output.rfind(tc_end)
+        if last_end == -1:
+            return False
+        last_start = full_output.rfind(tc_start)
+        # Must be past tc_start + its own length to count as "closed"
+        return last_end >= last_start + len(tc_start)
+
     if not in_tool_call:
         if tc_start in full_output:
+            if _after_last_end():
+                # Tool call fully closed — pass content through
+                return False, delta_content
             return True, None
+        # tc_start not yet complete — suppress while we're building the prefix
         if any(full_output.endswith(tc_start[:j]) for j in range(1, len(tc_start))):
             return False, None
     else:
+        # Currently inside a tool call; exit when the closing delimiter arrives
+        if _after_last_end():
+            return False, delta_content
         return True, None
+
     return in_tool_call, delta_content
 
 
@@ -1126,6 +1222,11 @@ def _build_gen_args(
     reasoning_effort = getattr(request, "reasoning_effort", None)
     if thinking_budget is None and reasoning_effort is not None:
         thinking_budget = reasoning_effort
+    # Apply server-wide default cap when client sends no budget at all.
+    # This prevents infinite thinking loops in long multi-tool conversations
+    # (e.g. Pi.dev after 10+ file reads) where the model never closes </think>.
+    if thinking_budget is None:
+        thinking_budget = get_server_default_thinking_budget()
     args = GenerationArguments(
         max_tokens=max_tokens,
         temperature=getattr(request, "temperature", DEFAULT_TEMPERATURE),
@@ -2266,13 +2367,25 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                     # Use ResponseGenerator if available, otherwise fall back to stream_generate
                     if response_generator is not None:
                         # generate() does blocking Queue.get — run off event loop
-                        ctx, token_iter = await asyncio.to_thread(
-                            response_generator.generate,
-                            formatted_prompt,
-                            images if images else None,
-                            audio if audio else None,
-                            gen_args,
-                        )
+                        try:
+                            ctx, token_iter = await asyncio.to_thread(
+                                response_generator.generate,
+                                formatted_prompt,
+                                images if images else None,
+                                audio if audio else None,
+                                gen_args,
+                            )
+                        except RuntimeError as _qe:
+                            _msg = str(_qe)
+                            if "request queue is full" in _msg:
+                                # Yield a well-formed SSE error then a 503-style
+                                # terminal chunk so the client sees the problem.
+                                yield (
+                                    f"data: {{\"error\": {{\"message\": \"{_msg}\","
+                                    f" \"type\": \"server_error\", \"code\": 503}}}}\n\n"
+                                )
+                                return
+                            raise
 
                         output_tokens = 0
                         request_id = f"chatcmpl-{uuid.uuid4()}"
@@ -2290,6 +2403,14 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                                 return next(token_iter)
                             except StopIteration:
                                 return None
+
+                        # SSE keepalive: emit a comment every N seconds when no
+                        # data chunk is yielded (e.g. during long thinking phases
+                        # where delta_content is suppressed).  Prevents proxies
+                        # and agent clients (Pi.dev, etc.) from closing an idle
+                        # connection before the model finishes reasoning.
+                        _SSE_KEEPALIVE_INTERVAL = 15.0  # seconds
+                        _last_sse_time = time.monotonic()
 
                         while True:
                             token = await asyncio.to_thread(_next_token)
@@ -2316,7 +2437,8 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
 
                             # Suppress tool-call markup from content
                             in_tool_call, delta_content = suppress_tool_call_content(
-                                full_output, in_tool_call, tc_start, delta_content
+                                full_output, in_tool_call, tc_start, delta_content,
+                                tc_end=tc_end,
                             )
 
                             chunk_logprobs = None
@@ -2367,6 +2489,14 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                                 )
 
                                 yield f"data: {chunk_data.model_dump_json()}\n\n"
+                                _last_sse_time = time.monotonic()
+                            else:
+                                # No payload this token (thinking, suppressed markup).
+                                # Emit an SSE comment to keep the connection alive.
+                                _now = time.monotonic()
+                                if _now - _last_sse_time >= _SSE_KEEPALIVE_INTERVAL:
+                                    yield ": keepalive\n\n"
+                                    _last_sse_time = _now
 
                             if token.finish_reason:
                                 break
@@ -3256,6 +3386,20 @@ def main():
         ),
     )
     parser.add_argument(
+        "--default-thinking-budget",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Server-wide thinking-token cap applied when a client request omits "
+            "thinking_budget and reasoning_effort.  Prevents infinite reasoning "
+            "loops in long multi-tool conversations (e.g. after 10+ tool calls). "
+            "Set to 0 to disable the cap (use with caution). "
+            f"Default: {DEFAULT_THINKING_BUDGET_CAP} tokens (also overridable via "
+            "XMLX_DEFAULT_THINKING_BUDGET env var)."
+        ),
+    )
+    parser.add_argument(
         "--kv-bits",
         type=float,
         default=None,
@@ -3279,6 +3423,18 @@ def main():
         type=int,
         default=None,
         help="Maximum KV cache size in tokens.",
+    )
+    parser.add_argument(
+        "--max-queue-depth",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Maximum number of pending requests in the GPU generation queue. "
+            "When full the server returns an error instead of OOM-crashing. "
+            f"Default: {DEFAULT_MAX_QUEUE_DEPTH}. Set to 0 for unbounded (not "
+            "recommended). Also overridable via XMLX_VLM_MAX_QUEUE_DEPTH."
+        ),
     )
     parser.add_argument(
         "--quantized-kv-start",
@@ -3399,6 +3555,9 @@ def main():
         os.environ["PREFILL_STEP_SIZE"] = str(args.prefill_step_size)
     os.environ["XMLX_VLM_MAX_TOKENS"] = str(args.max_tokens)
     os.environ["XMLX_VLM_ENABLE_THINKING"] = "1" if args.enable_thinking else "0"
+    if args.default_thinking_budget is not None:
+        # 0 means "disable cap"; env var "0" is caught by get_server_default_thinking_budget
+        os.environ["XMLX_DEFAULT_THINKING_BUDGET"] = str(args.default_thinking_budget)
     if args.kv_bits is not None:
         os.environ["KV_BITS"] = str(args.kv_bits)
     os.environ["KV_GROUP_SIZE"] = str(args.kv_group_size)
@@ -3419,6 +3578,8 @@ def main():
     if args.mcp_config:
         os.environ["MLX_MCP_CONFIG"] = args.mcp_config
     os.environ["XMLX_VLM_ENABLE_TOOL_LOGITS_BIAS"] = "1" if args.enable_tool_logits_bias else "0"
+    if args.max_queue_depth is not None:
+        os.environ["XMLX_VLM_MAX_QUEUE_DEPTH"] = str(args.max_queue_depth)
 
     # Configure logging
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
