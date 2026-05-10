@@ -1037,10 +1037,11 @@ def _dflash_rounds_batch(
         accepted_arr = mx.array(accepted_list)
 
         if min_accepted < bs - 1:
-            max_a = int(accepted_arr.max().item())
-            hidden = hidden_full[:, : max_a + 1, :]
+            # Trim to min_accepted+1 (conservative but correct).
+            # Using max_a would feed rejected-token hidden states to sequences
+            # with fewer acceptances, biasing the next draft round.
+            hidden = hidden_full[:, : min_accepted + 1, :]
         else:
-            max_a = bs - 1
             hidden = hidden_full
 
         for a in accepted_list:
