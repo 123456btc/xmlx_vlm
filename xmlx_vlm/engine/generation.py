@@ -33,6 +33,7 @@ from ..config import (
 )
 from ..generate import (
     BatchGenerator,
+    _apply_rep_penalty,
     _dflash_rounds_batch,
     _make_cache,
     _merge_prefill_prompt_kwargs,
@@ -629,6 +630,46 @@ class ResponseGenerator:
 
                 finished_uids = set()
 
+                # --- Build per-sequence repetition-penalty function ---
+                _rep_penalty = (
+                    getattr(args, "repetition_penalty", None)
+                    or float(os.environ.get("XMLX_VLM_REPETITION_PENALTY", "1.0"))
+                )
+                _rep_ctx_size = int(os.environ.get("XMLX_VLM_REPETITION_CONTEXT_SIZE", "20"))
+
+                if _rep_penalty and _rep_penalty != 1.0:
+                    # Capture mutable references so the closure sees live token_lists
+                    _tl = token_lists
+                    _uids = uids
+                    _p = float(_rep_penalty)
+                    _cs = _rep_ctx_size
+
+                    def rep_penalty_fn(active_orig_idx, logits):
+                        """Apply per-sequence repetition penalty.
+
+                        active_orig_idx maps active-slot j → original-batch index.
+                        logits: [B_active, bs, V].
+                        """
+                        penalized = []
+                        V = logits.shape[-1]
+                        for ai, orig_j in enumerate(active_orig_idx):
+                            uid_j = _uids[orig_j]
+                            ctx = _tl[uid_j][-_cs:]
+                            seq_l = logits[ai]  # [bs, V]
+                            if ctx:
+                                ctx_arr = mx.array(ctx, dtype=mx.int32)
+                                mask = mx.zeros(V, dtype=mx.bool_).at[ctx_arr].set(True)
+                                is_pos = seq_l > 0
+                                seq_l = mx.where(
+                                    mask[None, :],
+                                    mx.where(is_pos, seq_l / _p, seq_l * _p),
+                                    seq_l,
+                                )
+                            penalized.append(seq_l)
+                        return mx.stack(penalized, axis=0)
+                else:
+                    rep_penalty_fn = None
+
                 # Send first bonus tokens to clients
                 fb_list = first_bonus.tolist()
                 for j, uid in enumerate(uids):
@@ -675,6 +716,8 @@ class ResponseGenerator:
                     token_dtype=mx.int32,
                     stop_check=stop_check,
                 )
+                if not is_mtp and rep_penalty_fn is not None:
+                    rounds_kwargs["rep_penalty_fn"] = rep_penalty_fn
                 if is_mtp:
                     rounds_iter = rounds_batch(
                         self.model,

@@ -853,6 +853,30 @@ def _mtp_rounds_batch(
             mx.clear_cache()
 
 
+def _apply_rep_penalty(logits: mx.array, ctx_tokens: mx.array, penalty: float) -> mx.array:
+    """Apply repetition penalty to a block of logits.
+
+    Args:
+        logits:     ``[B, L, V]`` verify logits (float).
+        ctx_tokens: ``[K]`` int array of recent token ids to penalise.
+        penalty:    Penalty factor > 1.0.  Positive logits are divided;
+                    negative logits are multiplied (standard formulation).
+
+    Returns logits with the same shape as input.
+    """
+    if ctx_tokens is None or ctx_tokens.size == 0 or penalty == 1.0:
+        return logits
+    # Boolean mask over vocabulary — True for context tokens
+    V = logits.shape[-1]
+    mask = mx.zeros(V, dtype=mx.bool_).at[ctx_tokens].set(True)  # [V]
+    is_pos = logits > 0                                           # [B, L, V]
+    return mx.where(
+        mask[None, None, :],
+        mx.where(is_pos, logits / penalty, logits * penalty),
+        logits,
+    )
+
+
 def _dflash_rounds(
     model: nn.Module,
     draft_model: nn.Module,
@@ -864,12 +888,18 @@ def _dflash_rounds(
     sampler: Callable[[mx.array], mx.array],
     draft_block_size: Optional[int] = None,
     token_dtype: mx.Dtype = mx.int32,
+    processors: tuple = (),
+    tokens_ctx: Optional[mx.array] = None,
 ) -> Generator[Tuple[int, None], None, None]:
     """DFlash speculative-decoding **round loop**.
 
     draft → verify → walk → rollback. ``generate_step`` is responsible
     for prefill, sampling the first bonus token, and packaging the
     captured hidden states into ``hidden``.
+
+    ``processors`` / ``tokens_ctx`` enable repetition-penalty on the
+    target model's verify logits: the penalty is applied per-position
+    using the accumulated token context before each sampler call.
     """
     lm = model.language_model if hasattr(model, "language_model") else model
     if not hasattr(lm, "rollback_speculative_cache"):
@@ -911,7 +941,18 @@ def _dflash_rounds(
                 capture_layer_ids=target_layer_ids,
             )
             hidden = mx.concatenate(verify_out.hidden_states, axis=-1)
-            target_tokens = sampler(verify_out.logits)
+            # Apply repetition penalty to verify logits when processors are set
+            vlogits = verify_out.logits
+            if processors and tokens_ctx is not None and tokens_ctx.size > 0:
+                ctx_window = tokens_ctx[-20:]
+                penalized = []
+                for pos in range(bs):
+                    pos_l = vlogits[:, pos, :]  # [1, V]
+                    for proc in processors:
+                        pos_l = proc(ctx_window, pos_l)
+                    penalized.append(pos_l)
+                vlogits = mx.stack(penalized, axis=1)
+            target_tokens = sampler(vlogits)
         mx.async_eval(target_tokens, hidden)
 
         # Walk
@@ -926,6 +967,12 @@ def _dflash_rounds(
             emitted += 1
             if emitted >= max_tokens:
                 return
+
+        # Update rolling token context for next round's penalty
+        if tokens_ctx is not None and new_tokens:
+            tokens_ctx = mx.concat(
+                [tokens_ctx, mx.array(new_tokens, dtype=tokens_ctx.dtype)]
+            )
 
         if accepted < bs - 1:
             hidden = hidden[:, : accepted + 1, :]
@@ -953,6 +1000,7 @@ def _dflash_rounds_batch(
     draft_block_size: Optional[int] = None,
     token_dtype: mx.Dtype = mx.int32,
     stop_check: Optional[Callable[[int, int], bool]] = None,
+    rep_penalty_fn: Optional[Callable] = None,
 ) -> Generator[Tuple[List[Optional[int]], None], None, None]:
     """Batch DFlash speculative-decoding round loop (B > 1).
 
@@ -1024,7 +1072,10 @@ def _dflash_rounds_batch(
                 capture_layer_ids=target_layer_ids,
             )
             hidden_full = mx.concatenate(verify_out.hidden_states, axis=-1)
-            target_tokens = sampler(verify_out.logits)
+            vlogits = verify_out.logits
+            if rep_penalty_fn is not None:
+                vlogits = rep_penalty_fn(active_idx, vlogits)
+            target_tokens = sampler(vlogits)
         mx.async_eval(target_tokens, hidden_full)
 
         # Walk (per-sequence)
@@ -1408,6 +1459,8 @@ def generate_step(
                 sampler=sampler,
                 draft_block_size=draft_block_size,
                 token_dtype=input_ids.dtype,
+                processors=tuple(processors),
+                tokens_ctx=tokens if tokens.size > 0 else None,
             )
         else:
             mx.eval(y)
