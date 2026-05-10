@@ -23,59 +23,148 @@ def suppress_tool_call_content(
 
     Returns updated ``(in_tool_call, delta_content)``.
 
-    Tracks *both* ``tc_start`` and ``tc_end`` so that ``in_tool_call`` reverts
-    to ``False`` once the closing delimiter has been consumed.
+    Three bugs addressed:
 
-    Two distinct bugs are addressed here:
+    1. **State reset**: without ``tc_end`` tracking, ``in_tool_call`` stays
+       ``True`` forever — the Pi.dev "⠋ Working…" spinner that never resolves.
 
-    1. **State reset**: without tracking ``tc_end``, ``in_tool_call`` stays
-       ``True`` for the rest of the request — the Pi.dev "⠋ Working…" spinner
-       that never resolves in long agent loops.
+    2. **Closing-tag leak**: on the True→False transition the chunk *containing*
+       the closing delimiter was passed through as ``delta_content``, leaking
+       ``</tool_call>`` verbatim.
 
-    2. **Closing-tag leak**: when the state machine transitions out of the
-       tool-call window, the chunk that *contains* the closing delimiter (e.g.
-       ``</tool_call>``) must also be suppressed; the old code returned it as
-       ``delta_content``, which caused ``</parameter>``, ``</function>``, and
-       ``</tool_call>`` to appear verbatim in the streamed response.
+    3. **Bare ``<function=`` leak** (the main cause of the visible XML noise):
+       Some chat templates inject ``<tool_call>`` as a *generation prefix*
+       (part of the prompt, not generated tokens). The model then outputs only
+       ``<function=name><parameter=p>v</parameter></function>`` — the outer
+       ``<tool_call>`` wrapper never appears in ``full_output``, so
+       ``tc_start in full_output`` is always False and nothing gets suppressed.
+       Fix: when ``tc_start == "<tool_call>"`` is absent from ``full_output``
+       but ``<function=`` is present, switch to the bare-function delimiter pair
+       ``("<function=", "</function>")``.  A trailing ``</tool_call>`` emitted
+       by the model after ``</function>`` is also stripped.
 
-    Multiple tool calls in one reply are handled correctly: after each
-    ``tc_end`` the state resets, and a subsequent ``tc_start`` re-enters the
-    suppression window.  Any text that appears *after* ``tc_end`` within the
-    same streaming chunk is recovered and passed through.
+    Multiple tool calls in one reply are handled correctly: after each end
+    delimiter the state resets, and a subsequent start re-enters the suppression
+    window.  Text that follows the closing delimiter within the same streaming
+    chunk is recovered and passed through.
     """
     if not tc_start:
         return in_tool_call, delta_content
 
+    # ── Bare-function mode detection ─────────────────────────────────────────
+    # Triggered when the chat template injects tc_start as a prompt prefix so
+    # it never appears in the generated token stream.
+    _BARE_START = "<function="
+    _BARE_END   = "</function>"
+
+    # Decide which delimiter pair governs this call.
+    # We lock to bare mode once <function= has been seen WITHOUT tc_start,
+    # which happens on the token that completes "<function=".  Before that,
+    # the prefix-suppression logic below eats the leading "<" silently.
+    _use_bare = (
+        tc_start == "<tool_call>"
+        and tc_start not in full_output
+        and _BARE_START in full_output
+    )
+    eff_start = _BARE_START if _use_bare else tc_start
+    eff_end   = _BARE_END   if _use_bare else tc_end
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
     def _after_last_end() -> bool:
-        """True when the last tc_end in full_output comes after the last tc_start."""
-        if not tc_end:
+        """True when the last eff_end in full_output comes after the last eff_start."""
+        if not eff_end:
             return False
-        last_end = full_output.rfind(tc_end)
+        last_end = full_output.rfind(eff_end)
         if last_end == -1:
             return False
-        last_start = full_output.rfind(tc_start)
-        # Must be past tc_start + its own length to count as "closed"
-        return last_end >= last_start + len(tc_start)
+        last_start = full_output.rfind(eff_start)
+        return last_end >= last_start + len(eff_start)
+
+    def _recover_after(delimiter: str) -> Optional[str]:
+        """Return text that trails ``delimiter`` in delta_content, or None."""
+        if delimiter and delta_content and delimiter in delta_content:
+            tail = delta_content.split(delimiter, 1)[1]
+            # Strip a stray </tool_call> that sometimes follows </function>
+            if _use_bare and "</tool_call>" in tail:
+                tail = tail.replace("</tool_call>", "")
+            return tail if tail else None
+        return None
+
+    # ── State machine ─────────────────────────────────────────────────────────
 
     if not in_tool_call:
-        if tc_start in full_output:
+        if eff_start in full_output:
             if _after_last_end():
-                # Tool call fully closed — pass content through
+                # Standard mode: tool call fully closed — pass content through.
                 return False, delta_content
             return True, None
-        # tc_start not yet complete — suppress while we're building the prefix
-        if any(full_output.endswith(tc_start[:j]) for j in range(1, len(tc_start))):
-            return False, None
+
+        # eff_start not yet complete — suppress prefix build-up.
+        # Check BOTH tc_start and _BARE_START so the leading "<" is caught
+        # regardless of which format the model is using.
+        prefixes_to_check = [tc_start]
+        if tc_start == "<tool_call>":
+            prefixes_to_check.append(_BARE_START)
+        for pfx in prefixes_to_check:
+            if any(full_output.endswith(pfx[:j]) for j in range(1, len(pfx))):
+                return False, None
+
     else:
-        # Currently inside a tool call; exit when the closing delimiter arrives
-        if _after_last_end():
-            # Suppress the closing delimiter itself; recover any text that
-            # trails it within the same streaming chunk (rare but possible).
-            after_end = ""
-            if tc_end and delta_content and tc_end in delta_content:
-                after_end = delta_content.split(tc_end, 1)[1]
-            return False, after_end if after_end else None
-        return True, None
+        # ── Standard mode exit ───────────────────────────────────────────────
+        if not _use_bare:
+            if _after_last_end():
+                return False, _recover_after(eff_end)
+            return True, None
+
+        # ── Bare mode: stay suppressed until real content arrives ────────────
+        # After </function> the model often emits \n</tool_call>\n before the
+        # actual response.  We must suppress that entire cleanup window, not
+        # just the </function> chunk.  Strategy:
+        #   1. If </function> has NOT yet appeared → still inside the call.
+        #   2. If </function> HAS appeared:
+        #      a. Examine full_output tail after last </function>.
+        #      b. If tail is only whitespace / </tool_call> → still cleaning up.
+        #      c. Once real content appears in the tail → exit and recover it.
+        func_end_pos = full_output.rfind(_BARE_END)
+        if func_end_pos == -1:
+            # </function> not yet seen
+            return True, None
+
+        func_start_pos = full_output.rfind(_BARE_START)
+        if func_end_pos < func_start_pos + len(_BARE_START):
+            # A NEW <function= opened AFTER the last </function> — still inside
+            return True, None
+
+        # </function> has closed the last <function= block.
+        # Inspect everything that appeared after it.
+        tail_after_func = full_output[func_end_pos + len(_BARE_END):]
+
+        # Strip whitespace then any COMPLETE </tool_call> instances.
+        tail_no_ws = re.sub(r'\s', '', tail_after_func)
+        tail_no_tc = tail_no_ws.replace("</tool_call>", "")
+
+        if not tail_no_tc:
+            # Only whitespace / complete </tool_call> so far — still cleanup.
+            return True, None
+
+        if "</tool_call>".startswith(tail_no_tc):
+            # Partial </tool_call> being assembled char-by-char — keep suppressing.
+            return True, None
+
+        # Real content has arrived.  Recover it from the current delta.
+        if _BARE_END in delta_content:
+            # Closing tag and real content arrived in the SAME chunk.
+            after = delta_content.split(_BARE_END, 1)[1]
+            after = after.replace("</tool_call>", "")
+            return False, after if after else None
+        else:
+            # Closing tag was a previous chunk; this delta IS the real content
+            # (possibly prefixed by whitespace / </tool_call> cleanup tokens).
+            cleaned = delta_content.replace("</tool_call>", "") if delta_content else ""
+            return False, cleaned if cleaned else None
+
+    return in_tool_call, delta_content
 
     return in_tool_call, delta_content
 
