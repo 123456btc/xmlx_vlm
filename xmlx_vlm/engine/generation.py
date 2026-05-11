@@ -633,7 +633,7 @@ class ResponseGenerator:
                 # --- Build per-sequence repetition-penalty function ---
                 _rep_penalty = (
                     getattr(args, "repetition_penalty", None)
-                    or float(os.environ.get("XMLX_VLM_REPETITION_PENALTY", "1.0"))
+                    or float(os.environ.get("XMLX_VLM_REPETITION_PENALTY", "1.1"))
                 )
                 _rep_ctx_size = int(os.environ.get("XMLX_VLM_REPETITION_CONTEXT_SIZE", "20"))
 
