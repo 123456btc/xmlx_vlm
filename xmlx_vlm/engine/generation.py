@@ -658,7 +658,8 @@ class ResponseGenerator:
                             seq_l = logits[ai]  # [bs, V]
                             if ctx:
                                 ctx_arr = mx.array(ctx, dtype=mx.int32)
-                                mask = mx.zeros(V, dtype=mx.bool_).at[ctx_arr].set(True)
+                                mask = mx.zeros(V, dtype=mx.bool_)
+                                mask = mask.at[ctx_arr].add(True)
                                 is_pos = seq_l > 0
                                 seq_l = mx.where(
                                     mask[None, :],

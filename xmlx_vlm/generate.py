@@ -868,7 +868,8 @@ def _apply_rep_penalty(logits: mx.array, ctx_tokens: mx.array, penalty: float) -
         return logits
     # Boolean mask over vocabulary — True for context tokens
     V = logits.shape[-1]
-    mask = mx.zeros(V, dtype=mx.bool_).at[ctx_tokens].set(True)  # [V]
+    mask = mx.zeros(V, dtype=mx.bool_)
+    mask = mask.at[ctx_tokens].add(True)  # [V]
     is_pos = logits > 0                                           # [B, L, V]
     return mx.where(
         mask[None, None, :],

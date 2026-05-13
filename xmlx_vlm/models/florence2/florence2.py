@@ -19,7 +19,7 @@ def shift_tokens_right(
 ) -> mx.array:
     """Shift input tokens right, adding decoder start token at beginning."""
     shifted = mx.roll(input_ids, 1, axis=-1)
-    shifted = tree_map(lambda x: x.at[:, 0].set(decoder_start_token_id), shifted)
+    shifted = tree_map(lambda x: x.at[:, 0].add(decoder_start_token_id - x[:, 0]), shifted)
     shifted = mx.where(shifted == -100, pad_token_id, shifted)
     return shifted
 
