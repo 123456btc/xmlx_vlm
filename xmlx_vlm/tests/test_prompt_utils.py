@@ -389,3 +389,67 @@ class TestExtractTextFromContentEdgeCases:
         ]
         result = extract_text_from_content(content)
         assert result == "Actual content"
+
+
+
+from unittest.mock import MagicMock
+
+from xmlx_vlm.prompt_utils import get_chat_template
+
+
+def test_get_chat_template_defaults_enable_thinking_to_false_when_supported():
+    processor = MagicMock()
+    processor.chat_template = "test"
+    processor.apply_chat_template = MagicMock(return_value="prompt")
+    processor.apply_chat_template.__signature__ = MagicMock(
+        parameters={"enable_thinking": MagicMock(kind=MagicMock())}
+    )
+    # Re-create a real signature so inspect.signature works.
+    import inspect
+
+    def fake_apply(messages, *, tokenize=False, add_generation_prompt=True, enable_thinking=True):
+        return f"et={enable_thinking}"
+
+    processor.apply_chat_template = fake_apply
+
+    result = get_chat_template(
+        processor,
+        [{"role": "user", "content": "hi"}],
+        add_generation_prompt=True,
+    )
+    assert "et=False" in result
+
+
+def test_get_chat_template_respects_explicit_enable_thinking():
+    processor = MagicMock()
+    processor.chat_template = "test"
+
+    def fake_apply(messages, *, tokenize=False, add_generation_prompt=True, enable_thinking=True):
+        return f"et={enable_thinking}"
+
+    processor.apply_chat_template = fake_apply
+
+    result = get_chat_template(
+        processor,
+        [{"role": "user", "content": "hi"}],
+        add_generation_prompt=True,
+        enable_thinking=True,
+    )
+    assert result == "et=True"
+
+
+def test_get_chat_template_does_not_inject_enable_thinking_when_unsupported():
+    processor = MagicMock()
+    processor.chat_template = "test"
+
+    def fake_apply(messages, *, tokenize=False, add_generation_prompt=True):
+        return "ok"
+
+    processor.apply_chat_template = fake_apply
+
+    result = get_chat_template(
+        processor,
+        [{"role": "user", "content": "hi"}],
+        add_generation_prompt=True,
+    )
+    assert result == "ok"

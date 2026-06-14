@@ -10,7 +10,7 @@ Supports text, images, and video. Can use all server features:
 
 Usage:
     # Start the server first
-    xmlx_vlm serve --model mlx-community/Qwen3-VL-4B-Instruct-3bit --port 8080
+    xmlx_vlm serve --model mlx-community/diffusiongemma-26B-A4B-it-4bit --port 8080
 
     # Then run the chat UI
     xmlx_vlm chat_server

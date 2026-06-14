@@ -262,7 +262,7 @@ if __name__ == "__main__":
 
     # Model arguments
     parser.add_argument(
-        "--model-path", type=str, default="mlx-community/Qwen2-VL-2B-Instruct-bf16"
+        "--model-path", type=str, default="mlx-community/diffusiongemma-26B-A4B-it-4bit"
     )
     parser.add_argument("--full-finetune", action="store_true")
     parser.add_argument("--train-vision", action="store_true")

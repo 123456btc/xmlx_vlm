@@ -13,6 +13,7 @@ from xmlx_vlm.apc import (
     DiskBlockStore,
     _copy_mlx_array,
     _hash_tokens,
+    adjust_prefix_to_text_suffix_boundary,
     extract_prompt_cache_from_batch,
     from_env,
     harvest_blocks_from_batch_cache,
@@ -21,7 +22,12 @@ from xmlx_vlm.apc import (
     make_warm_batch_kv_cache,
     make_warm_batch_kv_cache_multi,
     make_warm_kv_cache,
+    media_safe_prefix_min,
+    media_token_spans,
     model_apc_mode,
+    multimodal_token_ids_from_config,
+    prefix_contains_media_tokens,
+    prefix_leaves_text_only_suffix,
     tenant_scoped_hash,
 )
 
@@ -236,7 +242,7 @@ def test_layer_major_memory_threshold_skips_block_pool(monkeypatch):
 
     assert stored == []
     assert manager.lookup_prefix(token_ids)[1] == 0
-    warm, matched_tokens = manager.lookup_exact_cache(token_ids + [999])
+    warm, matched_tokens, _ = manager.lookup_exact_cache(token_ids + [999])
     expected_tokens = len(token_ids) - block_size
     assert matched_tokens == expected_tokens
     assert warm is not None
@@ -468,7 +474,7 @@ def test_exact_cache_supports_mixed_kv_and_arrays_cache():
     arrays[1] = mx.ones((1, 2, 3)) * 3
 
     assert manager.store_exact_cache(token_ids, [arrays, kv], extra_hash=7)
-    warm, matched_tokens = manager.lookup_exact_cache(
+    warm, matched_tokens, _ = manager.lookup_exact_cache(
         token_ids + [999],
         extra_hash=7,
     )
@@ -521,7 +527,7 @@ def test_exact_cache_supports_rotating_and_chunked_kv_cache():
         [kv, rotating, chunked],
         extra_hash=13,
     )
-    warm, matched_tokens = manager.lookup_exact_cache(
+    warm, matched_tokens, _ = manager.lookup_exact_cache(
         token_ids + [999],
         extra_hash=13,
     )
@@ -566,7 +572,7 @@ def test_exact_cache_disk_restore_rebuilds_index(tmp_path, monkeypatch):
 
     disk = DiskBlockStore(tmp_path, namespace="exact")
     manager = APCManager(num_blocks=1, block_size=16, disk=disk)
-    warm, matched_tokens = manager.lookup_exact_cache(
+    warm, matched_tokens, _ = manager.lookup_exact_cache(
         token_ids + [999],
         extra_hash=11,
     )
@@ -607,7 +613,7 @@ def test_exact_cache_disk_restore_preserves_rotating_kv(tmp_path, monkeypatch):
 
     disk = DiskBlockStore(tmp_path, namespace="rotating-exact")
     manager = APCManager(num_blocks=1, block_size=16, disk=disk)
-    warm, matched_tokens = manager.lookup_exact_cache(
+    warm, matched_tokens, _ = manager.lookup_exact_cache(
         token_ids + [999],
         extra_hash=17,
     )
@@ -773,3 +779,61 @@ def test_disk_metadata_mismatch_is_a_miss(tmp_path):
     assert warm is None
     assert matched_tokens == 0
     manager.close()
+
+
+
+def test_multimodal_token_ids_from_config_collects_image_and_video_ids():
+    class Config:
+        image_token_id = 100
+        video_token_index = 200
+        unused_attr = 999
+
+    assert multimodal_token_ids_from_config(Config()) == {100, 200}
+    assert multimodal_token_ids_from_config(object()) == set()
+
+
+def test_media_token_spans_detects_contiguous_media_regions():
+    image_id = 42
+    token_ids = [1, 2, image_id, image_id, 5, 6, image_id, 8]
+    assert media_token_spans(token_ids, [image_id]) == ((2, 4), (6, 7))
+    assert media_token_spans(token_ids, []) == ()
+
+
+def test_media_safe_prefix_min_ensures_text_only_suffix():
+    image_id = 42
+    token_ids = [1, 2, image_id, 4, 5]
+    assert media_safe_prefix_min(token_ids, [image_id]) == 3
+    assert media_safe_prefix_min(token_ids, []) == 0
+
+
+def test_prefix_leaves_text_only_suffix():
+    image_id = 42
+    token_ids = [1, 2, image_id, 4, 5]
+    assert prefix_leaves_text_only_suffix(token_ids, 3, [image_id]) is True
+    assert prefix_leaves_text_only_suffix(token_ids, 2, [image_id]) is False
+
+
+def test_prefix_contains_media_tokens():
+    image_id = 42
+    token_ids = [1, 2, image_id, 4, 5]
+    assert prefix_contains_media_tokens(token_ids, 3, [image_id]) is True
+    assert prefix_contains_media_tokens(token_ids, 2, [image_id]) is False
+    assert prefix_contains_media_tokens(token_ids, 0, [image_id]) is False
+
+
+def test_adjust_prefix_to_text_suffix_boundary():
+    image_id = 42
+    token_ids = list(range(10)) + [image_id] + list(range(12, 20))
+    media_ids = [image_id]
+    # Desired prefix is before the image token -> push to after it.
+    assert adjust_prefix_to_text_suffix_boundary(
+        token_ids, 5, media_ids
+    ) == media_safe_prefix_min(token_ids, media_ids)
+    # Desired prefix already after the image token -> keep it.
+    assert adjust_prefix_to_text_suffix_boundary(token_ids, 13, media_ids) == 13
+    # No media -> desired is kept.
+    assert adjust_prefix_to_text_suffix_boundary(token_ids, 7, []) == 7
+    # max_prefix_tokens too small -> 0.
+    assert adjust_prefix_to_text_suffix_boundary(token_ids, 5, media_ids, max_prefix_tokens=5) == 0
+
+

@@ -29,6 +29,7 @@ from ..server_schemas import (
 )
 from ..embedding_engine import EmbeddingEngine
 from ..rerank_engine import RerankEngine
+from ..config import get_idle_kv_release_timeout
 from ..memory import get_memory_store
 from ..metrics import metrics
 from ..tool_parsers import _infer_tool_parser_from_processor
@@ -177,21 +178,29 @@ async def health_check():
     """
     Check if the server is healthy and what model is loaded.
     """
-    config = get_store().cache.get("config")
+    store = get_store()
+    config = store.cache.get("config")
     text_config = getattr(config, "text_config", None)
+    response_generator = store.response_generator
 
     return {
         "status": "healthy",
-        "loaded_model": get_store().cache.get("model_path", None),
-        "loaded_adapter": get_store().cache.get("adapter_path", None),
+        "loaded_model": store.cache.get("model_path", None),
+        "loaded_adapter": store.cache.get("adapter_path", None),
         "loaded_context_size": getattr(text_config, "max_position_embeddings", None),
         "loaded_tool_parser": (
-            _infer_tool_parser_from_processor(get_store().cache.get("processor"))
-            if get_store().cache.get("processor")
+            _infer_tool_parser_from_processor(store.cache.get("processor"))
+            if store.cache.get("processor")
             else None
         ),
-        "continuous_batching_enabled": get_store().response_generator is not None,
-        "apc_enabled": get_store().apc_manager is not None,
+        "continuous_batching_enabled": response_generator is not None,
+        "apc_enabled": store.apc_manager is not None,
+        "idle_kv_release_timeout": get_idle_kv_release_timeout(),
+        "idle_kv_released": (
+            getattr(response_generator, "_idle_kv_released", False)
+            if response_generator is not None
+            else False
+        ),
     }
 
 

@@ -27,18 +27,22 @@ VENV_PYTHON="${SCRIPT_DIR}/.venv/bin/python3"
 PID_DIR="${SCRIPT_DIR}/.pids"
 LOG_DIR="${SCRIPT_DIR}/.logs"
 
-MODEL="${XMLX_VLM_MODEL:-mlx-community/qwen3.6-35B-A3B-4bit}"
+MODEL="${XMLX_VLM_MODEL:-mlx-community/diffusiongemma-26B-A4B-it-4bit}"
 PORT="${XMLX_VLM_PORT:-8080}"
 CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
 API_KEY="${XMLX_VLM_API_KEY:-x123456}"
 EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
 
 # Default speculative decoding config
-DRAFT_MODEL="${XMLX_VLM_DRAFT_MODEL:-z-lab/Qwen3.6-35B-A3B-DFlash}"
+DRAFT_MODEL="${XMLX_VLM_DRAFT_MODEL:-}"
 DRAFT_KIND="${XMLX_VLM_DRAFT_KIND:-dflash}"
 
-# Default to NOT launching chat UI unless explicitly enabled via XMLX_VLM_CHAT=true
-CHAT_ENABLED="${XMLX_VLM_CHAT:-false}"
+# Default to launching chat UI alongside the server.
+# Set XMLX_VLM_CHAT=false (or use --no-chat) to start server only.
+CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
+
+# Computer Use mode: gui | autonomous | gui_voice | autonomous_voice
+COMPUTER_MODE="${XMLX_VLM_COMPUTER_MODE:-autonomous}"
 
 SERVER_PID_FILE="${PID_DIR}/server.pid"
 CHAT_PID_FILE="${PID_DIR}/chat.pid"
@@ -330,6 +334,28 @@ cmd_logs() {
     fi
 }
 
+cmd_computer() {
+    local mode="${1:-${COMPUTER_MODE}}"
+    case "$mode" in
+        gui|autonomous|gui_voice|autonomous_voice)
+            ;;
+        *)
+            echo "Unknown computer mode: $mode"
+            echo "Valid modes: gui, autonomous, gui_voice, autonomous_voice"
+            exit 1
+            ;;
+    esac
+
+    echo "Starting XMLX-VLM Computer Use ($mode)..."
+    echo "This loads its own GUI agent models and controls your mouse/keyboard."
+    echo "Make sure Screen Recording and Accessibility permissions are granted."
+    echo ""
+
+    # Run in foreground because computer_use agents are interactive CLIs.
+    cd "$SCRIPT_DIR"
+    exec "${SCRIPT_DIR}/.venv/bin/xmlx_vlm.computer_use.$mode"
+}
+
 # ─── Main ───────────────────────────────────────────────────────────────────
 
 cmd="${1:-}"
@@ -351,16 +377,21 @@ case "$cmd" in
     logs)
         cmd_logs "$@"
         ;;
+    computer)
+        cmd_computer "$@"
+        ;;
     *)
         cat <<EOF
 XMLX VLM Service Manager
 
 Usage:
-  $(basename "$0") start [--chat] [SERVER_OPTS]      Start server (chat UI is opt-in)
-  $(basename "$0") stop                               Stop server and chat UI
-  $(basename "$0") restart [--chat] [SERVER_OPTS]     Restart server
-  $(basename "$0") status                             Show running status
-  $(basename "$0") logs [server|chat]                 Tail logs
+  $(basename "$0") start [--no-chat] [SERVER_OPTS]      Start server with chat UI (default)
+  $(basename "$0") stop                                   Stop server and chat UI
+  $(basename "$0") restart [--no-chat] [SERVER_OPTS]    Restart server
+  $(basename "$0") status                                 Show running status
+  $(basename "$0") logs [server|chat]                     Tail logs
+  $(basename "$0") computer [gui|autonomous|gui_voice|autonomous_voice]
+                                                          Launch Computer Use agent (foreground)
 
 Server Options (override defaults passed to xmlx_vlm.server):
   --draft-model MODEL         Speculative drafter (default: ${DRAFT_MODEL})
@@ -369,21 +400,32 @@ Server Options (override defaults passed to xmlx_vlm.server):
   --kv-quant-scheme SCHEME    {uniform, turboquant}
 
 Environment:
-  XMLX_VLM_MODEL       Model to load (default: ${MODEL})
-  XMLX_VLM_PORT        Server port (default: ${PORT})
-  XMLX_VLM_CHAT_PORT   Chat UI port (default: ${CHAT_PORT})
-  XMLX_VLM_API_KEY     API key for auth
-  XMLX_VLM_ARGS        Extra server args (e.g. "--enable-thinking --moe-top-k 4")
-  XMLX_VLM_DRAFT_MODEL Speculative drafter (default: ${DRAFT_MODEL}; set empty to disable)
-  XMLX_VLM_DRAFT_KIND  Drafter family (default: ${DRAFT_KIND})
-  XMLX_VLM_CHAT        Launch chat UI (default: false; set "true" to enable)
+  XMLX_VLM_MODEL                 Model to load (default: ${MODEL})
+  XMLX_VLM_PORT                  Server port (default: ${PORT})
+  XMLX_VLM_CHAT_PORT             Chat UI port (default: ${CHAT_PORT})
+  XMLX_VLM_API_KEY               API key for auth
+  XMLX_VLM_ARGS                  Extra server args (e.g. "--enable-thinking --moe-top-k 4")
+  XMLX_VLM_DRAFT_MODEL           Speculative drafter (default: ${DRAFT_MODEL}; set empty to disable)
+  XMLX_VLM_DRAFT_KIND            Drafter family (default: ${DRAFT_KIND})
+  XMLX_VLM_CHAT                  Launch chat UI (default: true; set "false" to disable)
+  XMLX_VLM_COMPUTER_MODE             Default Computer Use mode (default: ${COMPUTER_MODE})
+  XMLX_VLM_COMPUTER_GUI_MODEL        Override GUI agent model (default: ${XMLX_VLM_MODEL:-diffusiongemma})
+  XMLX_VLM_COMPUTER_PLANNER_MODEL    Override planner model for autonomous mode (default: ${XMLX_VLM_MODEL:-diffusiongemma})
+  XMLX_VLM_COMPUTER_WHISPER_MODEL    Override whisper model for voice modes (default: whisper-large-v3-turbo)
 
 Examples:
-  # Default start — server only
+  # Default start — server + chat UI
   ./$(basename "$0") start
 
-  # Start with chat UI
-  ./$(basename "$0") start --chat
+  # Start server only
+  ./$(basename "$0") start --no-chat
+
+  # Start autonomous computer use agent
+  ./$(basename "$0") computer
+  ./$(basename "$0") computer autonomous
+
+  # Start voice-controlled computer use agent
+  ./$(basename "$0") computer autonomous_voice
 
   # Custom auth + KV quantization
   XMLX_VLM_API_KEY=mykey ./$(basename "$0") start --kv-bits 3.5 --kv-quant-scheme turboquant

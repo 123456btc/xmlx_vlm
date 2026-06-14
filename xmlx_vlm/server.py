@@ -24,6 +24,7 @@ from .app import app  # re-export for backward compat (uvicorn xmlx_vlm.server:a
 from .config import (
     DEFAULT_ENABLE_THINKING,
     DEFAULT_ENABLE_TOOL_LOGITS_BIAS,
+    DEFAULT_IDLE_KV_RELEASE_TIMEOUT,
     DEFAULT_KV_GROUP_SIZE,
     DEFAULT_KV_QUANT_SCHEME,
     DEFAULT_MAX_QUEUE_DEPTH,
@@ -59,7 +60,7 @@ def main():
         "--model",
         type=str,
         default=None,
-        help="Pre-load a model at startup (e.g. mlx-community/Qwen2.5-VL-3B-Instruct-4bit).",
+        help="Pre-load a model at startup (e.g. mlx-community/diffusiongemma-26B-A4B-it-4bit).",
     )
     parser.add_argument(
         "--adapter-path",
@@ -132,6 +133,18 @@ def main():
         type=int,
         default=None,
         help="Maximum KV cache size in tokens.",
+    )
+    parser.add_argument(
+        "--idle-kv-release-timeout",
+        type=float,
+        default=None,
+        metavar="SEC",
+        help=(
+            "Release the active KV cache, APC cache, and MLX cache pool after the "
+            "model has been idle for this many seconds. Set to 0 to disable. "
+            f"Default: {DEFAULT_IDLE_KV_RELEASE_TIMEOUT}s. Also overridable via "
+            "XMLX_VLM_IDLE_KV_RELEASE_TIMEOUT."
+        ),
     )
     parser.add_argument(
         "--max-queue-depth",
@@ -273,6 +286,8 @@ def main():
     os.environ["KV_QUANT_SCHEME"] = args.kv_quant_scheme
     if args.max_kv_size is not None:
         os.environ["MAX_KV_SIZE"] = str(args.max_kv_size)
+    if args.idle_kv_release_timeout is not None:
+        os.environ["XMLX_VLM_IDLE_KV_RELEASE_TIMEOUT"] = str(args.idle_kv_release_timeout)
     os.environ["QUANTIZED_KV_START"] = str(args.quantized_kv_start)
     if args.top_logprobs_k is not None:
         os.environ["TOP_LOGPROBS_K"] = str(args.top_logprobs_k)
@@ -306,6 +321,46 @@ def main():
         reload=args.reload,
         server_header=False,
     )
+
+
+# Backward-compatible shims for old tests/code that imported these from server.
+def get_cached_model(model_path: str, adapter_path=None):
+    from .model_store import get_store
+
+    return get_store().get_or_load(model_path, adapter_path)
+
+
+def apply_chat_template(*args, **kwargs):
+    from .prompt_utils import apply_chat_template as _fn
+
+    return _fn(*args, **kwargs)
+
+
+def generate(*args, **kwargs):
+    from .generate import generate as _fn
+
+    return _fn(*args, **kwargs)
+
+
+def build_json_schema_logits_processor(*args, **kwargs):
+    from .structured import build_json_schema_logits_processor as _fn
+
+    return _fn(*args, **kwargs)
+
+
+# Module-level apc_manager shim points at the store singleton.
+apc_manager = None
+
+
+def _sync_apc_manager_shim():
+    """Keep the legacy ``server.apc_manager`` attribute in sync with the store."""
+    global apc_manager
+    try:
+        from .model_store import get_store
+
+        apc_manager = get_store().apc_manager
+    except Exception:
+        apc_manager = None
 
 
 if __name__ == "__main__":

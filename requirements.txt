@@ -1,0 +1,37 @@
+mlx>=0.20.0
+mlx-lm
+numpy
+pillow
+transformers>=4.40.0
+torch>=2.0.0
+torchvision
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.0.0
+requests
+huggingface-hub>=0.22.0
+datasets
+tqdm
+rich
+tabulate
+scipy
+scikit-learn
+opencv-python
+gradio>=5.19.0
+sentencepiece
+protobuf
+
+# ai_trader dependencies
+requests  # 公开交易所 REST API
+# ccxt  # 可选：更完整的交易所接入（若安装则优先使用）
+
+# computer_use dependencies
+pyautogui
+pyperclip
+pynput
+pandas
+sounddevice
+soundfile
+SpeechRecognition>=3.12.0
+mlx-whisper>=0.4.1
+mlx-audio>=0.0.1

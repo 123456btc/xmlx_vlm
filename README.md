@@ -257,7 +257,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+    "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
     "messages": [
       {"role": "user", "content": "Analyze the attached document and extract structured findings"}
     ],
@@ -281,16 +281,16 @@ unset ANTHROPIC_API_KEY
 
 export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
-export ANTHROPIC_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
-export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="XMLX-VLM Local Qwen3.6"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="Local MLX inference via xmlx_vlm"
 
-export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
@@ -315,7 +315,7 @@ In your VS Code settings or `~/.continue/config.json`:
     {
       "title": "XMLX-VLM Local",
       "provider": "openai",
-      "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+      "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
       "apiBase": "http://localhost:8080/v1",
       "apiKey": "x123456"
     }
@@ -328,7 +328,7 @@ In your VS Code settings or `~/.continue/config.json`:
 ```bash
 export OPENAI_API_BASE=http://localhost:8080/v1
 export OPENAI_API_KEY=x123456
-aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
+aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
 
 ### Cursor (OpenAI-compatible)
@@ -336,7 +336,7 @@ aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
 In Cursor Settings → Models → Add Model:
 - **Base URL**: `http://localhost:8080/v1`
 - **API Key**: `x123456`
-- **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
+- **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
 ### Pi (pi.dev)
 
@@ -362,8 +362,8 @@ Pi is a local-first coding agent that pairs well with XMLX-VLM. Add the provider
       },
       "models": [
         {
-          "id": "mlx-community/qwen3.6-35B-A3B-4bit",
-          "name": "Qwen3.6 35B A3B 4bit (XMLX-VLM local)",
+          "id": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
+          "name": "DiffusionGemma 26B A4B 4bit (XMLX-VLM local)",
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null,
@@ -394,7 +394,7 @@ Then set as default in `~/.pi/agent/settings.json`:
 ```json
 {
   "defaultProvider": "xmlx-local",
-  "defaultModel": "mlx-community/qwen3.6-35B-A3B-4bit"
+  "defaultModel": "mlx-community/diffusiongemma-26B-A4B-it-4bit"
 }
 ```
 
@@ -447,6 +447,23 @@ The session checkpoint is what turns the SSD into a "first-class KV citizen" —
 - **Port collision** auto-resolution
 - **Health endpoint** at `/health`
 - **Structured logs** with rotation-friendly output
+
+### Automatic idle KV-cache release
+
+Long conversations and prefix caching can keep the KV cache resident long after the last request. After the model has been idle for **5 minutes** (default), XMLX-VLM automatically drops the active batch cache, clears the APC memory tier, and flushes the MLX cache pool — while keeping the model weights loaded so the next request only needs to re-prefill.
+
+```bash
+# Disable auto-release (keep KV cache in memory indefinitely)
+./service.sh start --idle-kv-release-timeout 0
+
+# Release KV cache after 60 seconds of inactivity
+./service.sh start --idle-kv-release-timeout 60
+
+# Or via environment variable
+XMLX_VLM_IDLE_KV_RELEASE_TIMEOUT=120 ./service.sh start
+```
+
+Check `/health` for `idle_kv_release_timeout` and `idle_kv_released` status.
 
 ---
 

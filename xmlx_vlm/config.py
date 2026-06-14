@@ -53,6 +53,12 @@ DEFAULT_SERVER_HOST = "0.0.0.0"
 DEFAULT_SERVER_PORT = 8080
 DEFAULT_TOKEN_QUEUE_TIMEOUT = 600.0
 DEFAULT_FIRST_TOKEN_TIMEOUT = None  # No timeout for first token (prefill) by default
+
+# When the generation thread has been idle for this many seconds, drop the
+# active BatchGenerator prompt cache, flush APC, and clear the MLX cache pool.
+# Set to 0 to disable automatic KV release.
+DEFAULT_IDLE_KV_RELEASE_TIMEOUT = 300.0  # 5 minutes
+
 DEFAULT_ENABLE_THINKING = False
 DEFAULT_ENABLE_TOOL_LOGITS_BIAS = False
 
@@ -105,6 +111,29 @@ def get_token_queue_timeout() -> Optional[float]:
 
 def get_first_token_timeout() -> Optional[float]:
     return _parse_timeout_env("XMLX_VLM_FIRST_TOKEN_TIMEOUT", DEFAULT_FIRST_TOKEN_TIMEOUT)
+
+
+def get_idle_kv_release_timeout() -> Optional[float]:
+    """Return the idle duration (seconds) after which KV cache is auto-released.
+
+    Reads ``XMLX_VLM_IDLE_KV_RELEASE_TIMEOUT``.  Values <= 0 disable the
+    mechanism.  ``None`` means disabled.
+    """
+    raw = os.environ.get("XMLX_VLM_IDLE_KV_RELEASE_TIMEOUT", "")
+    if raw.strip() == "":
+        return DEFAULT_IDLE_KV_RELEASE_TIMEOUT
+    try:
+        timeout = float(raw.strip())
+    except ValueError:
+        logger.warning(
+            "Invalid XMLX_VLM_IDLE_KV_RELEASE_TIMEOUT=%r; falling back to %ss.",
+            raw,
+            DEFAULT_IDLE_KV_RELEASE_TIMEOUT,
+        )
+        return DEFAULT_IDLE_KV_RELEASE_TIMEOUT
+    if timeout <= 0:
+        return None
+    return timeout
 
 
 # ---------------------------------------------------------------------------

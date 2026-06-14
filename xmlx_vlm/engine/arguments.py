@@ -113,6 +113,11 @@ def _request_field_or_default(request, field_name: str, default):
     return default if value is None else value
 
 
+def _model_config_field_or_default(processor, field_name: str, default):
+    config = getattr(processor, "config", None)
+    return getattr(config, field_name, default)
+
+
 def _read_tenant_id(http_request) -> Optional[str]:
     """Pull a per-tenant APC salt from the request headers.
 
@@ -260,11 +265,22 @@ def _build_gen_args(
     # (e.g. Pi.dev after 10+ file reads) where the model never closes </think>.
     if thinking_budget is None:
         thinking_budget = get_server_default_thinking_budget()
+
+    default_temperature = _model_config_field_or_default(
+        processor, "temperature", DEFAULT_TEMPERATURE
+    )
+    default_top_p = _model_config_field_or_default(processor, "top_p", DEFAULT_TOP_P)
+    default_top_k = _model_config_field_or_default(processor, "top_k", 0)
+    if _model_config_field_or_default(processor, "do_sample", None) is False:
+        default_temperature = 0.0
+
     args = GenerationArguments(
         max_tokens=max_tokens,
-        temperature=getattr(request, "temperature", DEFAULT_TEMPERATURE),
-        top_p=getattr(request, "top_p", DEFAULT_TOP_P),
-        top_k=getattr(request, "top_k", 0),
+        temperature=_request_field_or_default(
+            request, "temperature", default_temperature
+        ),
+        top_p=_request_field_or_default(request, "top_p", default_top_p),
+        top_k=_request_field_or_default(request, "top_k", default_top_k),
         min_p=getattr(request, "min_p", 0.0),
         repetition_penalty=getattr(request, "repetition_penalty", None),
         logit_bias=logit_bias,

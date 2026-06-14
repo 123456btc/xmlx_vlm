@@ -36,11 +36,19 @@ Issues = "https://github.com/Blaizzy/mlx-vlm/issues"
 "xmlx_vlm.convert" = "xmlx_vlm.convert:main"
 "xmlx_vlm.generate" = "xmlx_vlm.generate:main"
 "xmlx_vlm.server" = "xmlx_vlm.server:main"
+"xmlx_vlm.computer_use.gui" = "xmlx_vlm.computer_use.gui_agent:main"
+"xmlx_vlm.computer_use.autonomous" = "xmlx_vlm.computer_use.autonomous_gui_agent:main"
+"xmlx_vlm.computer_use.gui_voice" = "xmlx_vlm.computer_use.gui_agent_voice:main"
+"xmlx_vlm.computer_use.autonomous_voice" = "xmlx_vlm.computer_use.autonomous_gui_agent_voice:main"
+"xmlx_vlm.ai-trader" = "xmlx_vlm.ai_trader.cli:main"
 "xmlx_vlm" = "xmlx_vlm.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["xmlx_vlm*"]
 exclude = ["xmlx_vlm.tests*"]
+
+[tool.setuptools.package-data]
+xmlx_vlm = ["computer_use/audio/*.wav", "computer_use/README.md"]
 
 [tool.setuptools.dynamic]
 version = {attr = "xmlx_vlm.version.__version__"}

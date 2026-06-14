@@ -10,7 +10,7 @@ import json, os, re, sys, time, asyncio, websockets, urllib.request
 
 MLX_URL = os.environ.get("MLX_URL", "http://localhost:8080")
 CDP_URL = os.environ.get("CDP_URL", "http://127.0.0.1:9222")
-MODEL = os.environ.get("MLX_MODEL_NAME", "mlx-community/qwen3.6-35B-A3B-4bit")
+MODEL = os.environ.get("MLX_MODEL_NAME", "mlx-community/diffusiongemma-26B-A4B-it-4bit")
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "15"))
 
 B, G, Y, R, D, BD, RS = "\033[94m", "\033[92m", "\033[93m", "\033[91m", "\033[2m", "\033[1m", "\033[0m"

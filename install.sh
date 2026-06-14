@@ -10,7 +10,7 @@
 #   1. Checks macOS + Apple Silicon
 #   2. Installs Xcode Command Line Tools (if missing)
 #   3. Installs Homebrew (if missing)
-#   4. Installs Python 3.12 (if < 3.10)
+#   4. Installs Python 3.14 (if < 3.10)
 #   5. Installs uv (fast Python package manager)
 #   6. Clones xmlx_vlm repo (if not already inside it)
 #   7. Creates virtual environment + installs all dependencies
@@ -86,7 +86,7 @@ else
     fi
 fi
 
-# ─── 4. Python 3.10+ ────────────────────────────────────────────────────────
+# ─── 4. Python 3.10+ (prefer 3.14, the project default) ─────────────────────
 info "Checking Python version..."
 
 PYTHON_CMD=""
@@ -104,17 +104,17 @@ for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
 done
 
 if [[ -z "$PYTHON_CMD" ]]; then
-    info "Python 3.10+ not found. Installing Python 3.12 via Homebrew..."
-    brew install python@3.12
-    if [[ -f /opt/homebrew/bin/python3.12 ]]; then
-        PYTHON_CMD="/opt/homebrew/bin/python3.12"
-    elif [[ -f /usr/local/bin/python3.12 ]]; then
-        PYTHON_CMD="/usr/local/bin/python3.12"
+    info "Python 3.10+ not found. Installing Python 3.14 via Homebrew..."
+    brew install python@3.14
+    if [[ -f /opt/homebrew/bin/python3.14 ]]; then
+        PYTHON_CMD="/opt/homebrew/bin/python3.14"
+    elif [[ -f /usr/local/bin/python3.14 ]]; then
+        PYTHON_CMD="/usr/local/bin/python3.14"
     else
-        err "Failed to install Python 3.12"
+        err "Failed to install Python 3.14"
         exit 1
     fi
-    ok "Python 3.12 installed"
+    ok "Python 3.14 installed"
 fi
 
 # Ensure pip is available
@@ -208,25 +208,21 @@ else
     ok "Virtual environment already exists"
 fi
 
-# Activate venv for uv
-source .venv/bin/activate
+# uv automatically discovers .venv in the current directory, so activation is
+# not required. We keep PATH for the uv binary installed earlier.
+export PATH="$(pwd)/.venv/bin:${PATH}"
 
-info "Installing core MLX packages (this may take 5-10 minutes)..."
-uv pip install --upgrade mlx mlx-lm
-
-info "Installing project dependencies (this may take 5-10 minutes)..."
-uv pip install -r requirements.txt
-
-info "Installing XMLX-VLM in editable mode..."
-uv pip install -e "."
-
+# Install project + all requirements in one pass. uv resolves and downloads the
+# dependency graph only once, which is significantly faster than pip.
+info "Installing project dependencies with uv (this may take 5-10 minutes on first run)..."
+uv pip install -r requirements.txt -e "."
 ok "All dependencies installed"
 
 # ─── 9. Environment defaults ────────────────────────────────────────────────
 info "Setting default environment variables..."
 
 export XMLX_VLM_API_KEY="${XMLX_VLM_API_KEY:-x123456}"
-export XMLX_VLM_MODEL="${XMLX_VLM_MODEL:-mlx-community/qwen3.6-35B-A3B-4bit}"
+export XMLX_VLM_MODEL="${XMLX_VLM_MODEL:-mlx-community/diffusiongemma-26B-A4B-it-4bit}"
 export XMLX_VLM_PORT="${XMLX_VLM_PORT:-8080}"
 export XMLX_VLM_CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
 
@@ -244,7 +240,7 @@ if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
 
 # XMLX-VLM defaults
 export XMLX_VLM_API_KEY="x123456"
-export XMLX_VLM_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export XMLX_VLM_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 export XMLX_VLM_PORT="8080"
 export XMLX_VLM_CHAT_PORT="7860"
 ENVEOF
@@ -255,11 +251,11 @@ fi
 # ─── 10. Pre-download default model (optional) ──────────────────────────────
 read -r -p "Pre-download default model (~20GB)? This avoids wait on first start. [y/N] " response </dev/tty || true
 if [[ "$response" =~ ^[Yy]$ ]]; then
-    info "Downloading default model (mlx-community/qwen3.6-35B-A3B-4bit)..."
+    info "Downloading default model (mlx-community/diffusiongemma-26B-A4B-it-4bit)..."
     info "This will take 10-30 minutes depending on your connection."
     .venv/bin/python -c "
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id='mlx-community/qwen3.6-35B-A3B-4bit', local_dir='./models/qwen3.6-35B-A3B-4bit', local_dir_use_symlinks=False)
+snapshot_download(repo_id='mlx-community/diffusiongemma-26B-A4B-it-4bit', local_dir='./models/diffusiongemma-26B-A4B-it-4bit', local_dir_use_symlinks=False)
 " || warn "Model download failed (will retry on first server start)"
     ok "Model download complete"
 fi
@@ -272,7 +268,7 @@ echo -e "${GREEN}╠════════════════════
 echo -e "${GREEN}║  Repository: ${NC}$SCRIPT_DIR"
 echo -e "${GREEN}║  Virtual Env: ${NC}$SCRIPT_DIR/.venv"
 echo -e "${GREEN}║  API Key: ${NC}x123456"
-echo -e "${GREEN}║  Model: ${NC}mlx-community/qwen3.6-35B-A3B-4bit"
+echo -e "${GREEN}║  Model: ${NC}mlx-community/diffusiongemma-26B-A4B-it-4bit"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  Quick Start:                                                        ║${NC}"
 echo -e "${GREEN}║    cd ${NC}$SCRIPT_DIR"

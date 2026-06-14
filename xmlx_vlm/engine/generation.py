@@ -12,6 +12,7 @@ import-clean and independently testable.
 import gc
 import logging
 import os
+import time
 import traceback
 from dataclasses import dataclass
 from queue import Empty as QueueEmpty
@@ -23,11 +24,13 @@ from typing import Callable, Iterator, List, Optional, Tuple
 import mlx.core as mx
 
 from .. import apc as _apc
+from .. import diffusion_generate
 from ..config import (
     DEFAULT_KV_GROUP_SIZE,
     DEFAULT_KV_QUANT_SCHEME,
     DEFAULT_QUANTIZED_KV_START,
     get_first_token_timeout,
+    get_idle_kv_release_timeout,
     get_server_max_queue_depth,
     get_token_queue_timeout,
 )
@@ -162,6 +165,9 @@ class ResponseGenerator:
         self._load_error: Optional[Exception] = None
         self._cancelled: set = set()
         self._cancel_lock = Lock()
+        self._idle_kv_release_timeout: Optional[float] = get_idle_kv_release_timeout()
+        self._last_activity_time: float = time.time()
+        self._idle_kv_released: bool = False
         self._thread = Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -239,6 +245,7 @@ class ResponseGenerator:
         from ..server_schemas import get_server_max_tokens
 
         self.wait_until_ready()
+        self._mark_active()
         args = args or GenerationArguments(max_tokens=get_server_max_tokens())
         if self.draft_model is not None and args.logits_processors is not None:
             raise ValueError(
@@ -321,11 +328,46 @@ class ResponseGenerator:
 
         return ctx, token_iterator()
 
+    def _mark_active(self):
+        """Record that a request has arrived so idle-release does not fire."""
+        self._last_activity_time = time.time()
+        self._idle_kv_released = False
+
+    def _release_idle_kv(self, batch_gen):
+        """Release KV caches and MLX cache pool after an idle period.
+
+        Runs on the GPU thread.  Keeps the model weights loaded so the next
+        request only needs to re-prefill.
+        """
+        if batch_gen is not None:
+            try:
+                batch_gen.close()
+            except Exception as exc:
+                logger.warning("Error closing BatchGenerator during idle release: %s", exc)
+
+        if self.apc_manager is not None:
+            try:
+                self.apc_manager.clear()
+            except Exception as exc:
+                logger.warning("Error clearing APC during idle release: %s", exc)
+
+        try:
+            mx.clear_cache()
+            gc.collect()
+        except Exception as exc:
+            logger.warning("Error clearing MLX cache during idle release: %s", exc)
+
+        self._idle_kv_released = True
+        logger.info(
+            "Idle for %.1fs — released KV cache, APC cache, and MLX cache pool.",
+            self._idle_kv_release_timeout,
+        )
+
     def _cpu_preprocess(self, prompt, images=None, audio=None) -> dict:
         """CPU-only: tokenize text, load/resize images. Thread-safe."""
         add_special_tokens = (
             getattr(self.processor, "chat_template", None) is None
-            if self.model.config.model_type in ["gemma3", "gemma3n", "gemma4"]
+            if self.model.config.model_type in ["gemma3", "gemma3n", "gemma4", "diffusion_gemma"]
             else True
         )
         image_token_index = getattr(self.model.config, "image_token_index", None)
@@ -400,6 +442,10 @@ class ResponseGenerator:
 
         self._ready.set()
 
+        if diffusion_generate.is_diffusion_model(self.model):
+            self._run_diffusion()
+            return
+
         if self.draft_model is not None:
             self._run_speculative()
             return
@@ -434,7 +480,14 @@ class ResponseGenerator:
                         else:
                             new_items.append(item)
                     except QueueEmpty:
-                        pass
+                        if (
+                            self._idle_kv_release_timeout is not None
+                            and batch_gen is not None
+                            and (time.time() - self._last_activity_time)
+                            > self._idle_kv_release_timeout
+                        ):
+                            self._release_idle_kv(batch_gen)
+                            batch_gen = None
 
                 while True:
                     try:
@@ -573,6 +626,12 @@ class ResponseGenerator:
                         break
 
                 if not pending:
+                    if (
+                        self._idle_kv_release_timeout is not None
+                        and (time.time() - self._last_activity_time)
+                        > self._idle_kv_release_timeout
+                    ):
+                        self._release_idle_kv(None)
                     continue
 
                 # --- Phase 2: prefill new batch ---
@@ -797,6 +856,97 @@ class ResponseGenerator:
                 print(f"Error in speculative generation thread: {e}")
                 traceback.print_exc()
 
+    def _run_diffusion(self):
+        """Single-request GPU thread for block-diffusion models.
+
+        Diffusion models (e.g. DiffusionGemma) do not fit the autoregressive
+        BatchGenerator loop, so we run one request at a time through the shared
+        diffusion engine and stream text deltas back to the caller.
+        """
+        from ..generate import wired_limit
+
+        generation_stream = mx.default_stream(mx.default_device())
+
+        with wired_limit(self.model, [generation_stream]):
+            while not self._stop:
+                try:
+                    item = self.requests.get(timeout=0.1)
+                except QueueEmpty:
+                    if (
+                        self._idle_kv_release_timeout is not None
+                        and (time.time() - self._last_activity_time)
+                        > self._idle_kv_release_timeout
+                    ):
+                        self._release_idle_kv(None)
+                    continue
+                if item is None and self._stop:
+                    break
+                if item is None:
+                    continue
+
+                rqueue, raw_inputs, prompt_tokens, args, images = item
+
+                try:
+                    input_ids = raw_inputs.get("input_ids")
+                    pixel_values = raw_inputs.get("pixel_values")
+                    mask = raw_inputs.get("attention_mask")
+                    tokenizer = (
+                        self.processor.tokenizer
+                        if hasattr(self.processor, "tokenizer")
+                        else self.processor
+                    )
+                    skip_special_token_ids = set(tokenizer.all_special_ids)
+                    data_kwargs = {
+                        k: v
+                        for k, v in raw_inputs.items()
+                        if k not in ["input_ids", "pixel_values", "attention_mask"]
+                    }
+
+                    detokenizer = make_streaming_detokenizer(self.processor)
+                    rqueue.put(GenerationContext(uid=0, prompt_tokens=prompt_tokens))
+
+                    for response in diffusion_generate.stream_diffusion_generate_from_kwargs(
+                        self.model,
+                        self.processor,
+                        tokenizer,
+                        input_ids,
+                        pixel_values,
+                        mask,
+                        skip_special_token_ids,
+                        {
+                            "max_tokens": args.max_tokens,
+                            "temperature": args.temperature,
+                            **data_kwargs,
+                        },
+                    ):
+                        text = response.text
+                        if text:
+                            detokenizer.add_token(0)
+                            segment = detokenizer.last_segment
+                            # Override with the diffusion engine's own text delta
+                            segment = text
+                            rqueue.put(
+                                StreamingToken(
+                                    text=segment,
+                                    token=response.token if response.token is not None else -1,
+                                    logprobs=0.0,
+                                    finish_reason=response.finish_reason,
+                                    peak_memory=mx.get_peak_memory() / 1e9
+                                    if response.finish_reason
+                                    else 0.0,
+                                )
+                            )
+                        if response.finish_reason is not None:
+                            rqueue.put(None)
+                            break
+
+                except Exception as e:
+                    logger.exception("Error in diffusion generation thread")
+                    rqueue.put(e)
+                    rqueue.put(None)
+                    mx.clear_cache()
+                    gc.collect()
+
     def _step(self, batch_gen, active, gen_kwargs=None):
         """One batch generation step: prefill + decode."""
         kwargs = gen_kwargs or {}
@@ -833,6 +983,9 @@ class ResponseGenerator:
             if r.finish_reason is not None:
                 rqueue.put(None)
                 del active[r.uid]
+
+        # A long-running request keeps the GPU busy; don't treat it as idle.
+        self._last_activity_time = time.time()
 
     def _stream_text(self, info: dict, token: int, finish_reason: Optional[str]) -> str:
         """Convert one generated token into a streaming text segment."""

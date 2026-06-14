@@ -257,7 +257,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+    "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
     "messages": [
       {"role": "user", "content": "Analyze the attached document and extract structured findings"}
     ],
@@ -281,16 +281,16 @@ unset ANTHROPIC_API_KEY
 
 export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
-export ANTHROPIC_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
-export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="XMLX-VLM Local Qwen3.6"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="Local MLX inference via xmlx_vlm"
 
-export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
@@ -315,7 +315,7 @@ VS Code 설정 또는 `~/.continue/config.json`에서:
     {
       "title": "XMLX-VLM Local",
       "provider": "openai",
-      "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+      "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
       "apiBase": "http://localhost:8080/v1",
       "apiKey": "x123456"
     }
@@ -328,7 +328,7 @@ VS Code 설정 또는 `~/.continue/config.json`에서:
 ```bash
 export OPENAI_API_BASE=http://localhost:8080/v1
 export OPENAI_API_KEY=x123456
-aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
+aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
 
 ### Cursor(OpenAI 호환)
@@ -336,7 +336,7 @@ aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
 Cursor 설정 → 모델 → 모델 추가:
 - **Base URL**: `http://localhost:8080/v1`
 - **API Key**: `x123456`
-- **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
+- **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
 ### Pi(pi.dev)
 
@@ -362,8 +362,8 @@ Pi는 XMLX-VLM과 잘 어울리는 로컬 우선 코딩 에이전트입니다. `
       },
       "models": [
         {
-          "id": "mlx-community/qwen3.6-35B-A3B-4bit",
-          "name": "Qwen3.6 35B A3B 4bit (XMLX-VLM local)",
+          "id": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
+          "name": "DiffusionGemma 26B A4B 4bit (XMLX-VLM local)",
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null,
@@ -394,7 +394,7 @@ Pi는 XMLX-VLM과 잘 어울리는 로컬 우선 코딩 에이전트입니다. `
 ```json
 {
   "defaultProvider": "xmlx-local",
-  "defaultModel": "mlx-community/qwen3.6-35B-A3B-4bit"
+  "defaultModel": "mlx-community/diffusiongemma-26B-A4B-it-4bit"
 }
 ```
 

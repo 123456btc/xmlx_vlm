@@ -10,6 +10,9 @@ import time
 import traceback
 
 import mlx.core as mx
+import pytest
+
+pytestmark = pytest.mark.skip(reason="Smoke tests are standalone CLI scripts; run via `python xmlx_vlm/tests/test_smoke.py --models-file ...`")
 
 
 # Function to check if a package is installed

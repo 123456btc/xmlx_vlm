@@ -258,7 +258,9 @@ def test_rerank_endpoint_returns_expected_structure(client):
         12,
     )
 
-    with patch.object(server, "_rerank_engine", mock_engine):
+    mock_store = MagicMock()
+    mock_store.get_rerank_engine.return_value = mock_engine
+    with patch("xmlx_vlm.routes.admin.get_store", return_value=mock_store):
         response = client.post(
             "/v1/rerank",
             json={
@@ -287,7 +289,9 @@ def test_rerank_endpoint_creates_new_engine_for_different_model(client):
     mock_engine_a.model_name = "model-a"
     mock_engine_a.score_pairs.return_value = ([0.8], 4)
 
-    with patch.object(server, "_rerank_engine", mock_engine_a):
+    mock_store = MagicMock()
+    mock_store.get_rerank_engine.return_value = mock_engine_a
+    with patch("xmlx_vlm.routes.admin.get_store", return_value=mock_store):
         # Request with same model
         response = client.post(
             "/v1/rerank",
@@ -300,21 +304,20 @@ def test_rerank_endpoint_creates_new_engine_for_different_model(client):
         assert response.status_code == 200
         mock_engine_a.score_pairs.assert_called_once()
 
-    # Request with different model should create new engine
-    with patch.object(
-        server, "RerankEngine", return_value=mock_engine_a
-    ) as mock_cls:
-        with patch.object(server, "_rerank_engine", mock_engine_a):
-            response = client.post(
-                "/v1/rerank",
-                json={
-                    "model": "model-b",
-                    "query": "q",
-                    "documents": ["d"],
-                },
-            )
-            assert response.status_code == 200
-            mock_cls.assert_called_once_with("model-b")
+    # Request with different model should hit the store for a new engine.
+    mock_store = MagicMock()
+    mock_store.get_rerank_engine.return_value = mock_engine_a
+    with patch("xmlx_vlm.routes.admin.get_store", return_value=mock_store):
+        response = client.post(
+            "/v1/rerank",
+            json={
+                "model": "model-b",
+                "query": "q",
+                "documents": ["d"],
+            },
+        )
+        assert response.status_code == 200
+        mock_store.get_rerank_engine.assert_called_once_with("model-b")
 
 
 # ── DistilBERT architecture tests ───────────────────────────────────────────

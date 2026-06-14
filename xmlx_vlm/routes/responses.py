@@ -86,7 +86,7 @@ async def responses_endpoint(request: Request, _=Depends(verify_api_key)):
     API_URL = "http://0.0.0.0:8000"
     API_KEY = 'any'
 
-    def run_openai(prompt, img_url,system, stream=False, max_output_tokens=512, model="mlx-community/Qwen2.5-VL-3B-Instruct-8bit"):
+    def run_openai(prompt, img_url,system, stream=False, max_output_tokens=512, model="mlx-community/diffusiongemma-26B-A4B-it-4bit"):
         ''' Calls the OpenAI API
         '''
 

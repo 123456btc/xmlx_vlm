@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
                                help="Server base URL")
     mcp_install_p.add_argument("--api-key", type=str, default="x123456",
                                help="API key for the server")
-    mcp_install_p.add_argument("--model", type=str, default="mlx-community/qwen3.6-35B-A3B-4bit",
+    mcp_install_p.add_argument("--model", type=str, default="mlx-community/diffusiongemma-26B-A4B-it-4bit",
                                help="Default model name")
 
     # model subcommand

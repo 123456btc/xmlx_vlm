@@ -259,7 +259,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+    "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
     "messages": [
       {"role": "user", "content": "分析附件文档并提取结构化发现"}
     ],
@@ -283,16 +283,16 @@ unset ANTHROPIC_API_KEY
 
 export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
-export ANTHROPIC_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
-export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_CUSTOM_MODEL_OPTION="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME="XMLX-VLM Local Qwen3.6"
 export ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="本地 MLX 推理 via xmlx_vlm"
 
-export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
-export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/qwen3.6-35B-A3B-4bit"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export CLAUDE_CODE_SUBAGENT_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1
@@ -317,7 +317,7 @@ APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start
     {
       "title": "XMLX-VLM Local",
       "provider": "openai",
-      "model": "mlx-community/qwen3.6-35B-A3B-4bit",
+      "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
       "apiBase": "http://localhost:8080/v1",
       "apiKey": "x123456"
     }
@@ -330,7 +330,7 @@ APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start
 ```bash
 export OPENAI_API_BASE=http://localhost:8080/v1
 export OPENAI_API_KEY=x123456
-aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
+aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
 
 ### Cursor（OpenAI 兼容）
@@ -338,7 +338,7 @@ aider --model openai/mlx-community/qwen3.6-35B-A3B-4bit
 在 Cursor 设置 → Models → Add Model：
 - **Base URL**: `http://localhost:8080/v1`
 - **API Key**: `x123456`
-- **Model**: `mlx-community/qwen3.6-35B-A3B-4bit`
+- **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
 ### Pi（pi.dev）
 
@@ -364,8 +364,8 @@ Pi 是一款本地优先的编程 Agent，与 XMLX-VLM 配合良好。在 `~/.pi
       },
       "models": [
         {
-          "id": "mlx-community/qwen3.6-35B-A3B-4bit",
-          "name": "Qwen3.6 35B A3B 4bit (XMLX-VLM local)",
+          "id": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
+          "name": "DiffusionGemma 26B A4B 4bit (XMLX-VLM local)",
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null,
@@ -396,7 +396,7 @@ Pi 是一款本地优先的编程 Agent，与 XMLX-VLM 配合良好。在 `~/.pi
 ```json
 {
   "defaultProvider": "xmlx-local",
-  "defaultModel": "mlx-community/qwen3.6-35B-A3B-4bit"
+  "defaultModel": "mlx-community/diffusiongemma-26B-A4B-it-4bit"
 }
 ```
 

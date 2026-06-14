@@ -1,3 +1,4 @@
+import inspect
 from enum import Enum
 from functools import partial
 from typing import Any, Dict, List, Union
@@ -57,6 +58,7 @@ MODEL_CONFIG = {
     "gemma3": MessageFormat.START_IMAGE_TOKEN,
     "gemma3n": MessageFormat.LIST_WITH_IMAGE_TYPE_TEXT,
     "gemma4": MessageFormat.LIST_WITH_IMAGE_TYPE_TEXT,
+    "diffusion_gemma": MessageFormat.LIST_WITH_IMAGE_TYPE_TEXT,
     "llama4": MessageFormat.LIST_WITH_IMAGE,
     "smolvlm": MessageFormat.LIST_WITH_IMAGE_FIRST,
     "llava": MessageFormat.LIST_WITH_IMAGE,
@@ -603,6 +605,17 @@ def get_chat_template(
 
     chat_template_override = kwargs.get("chat_template", None)
 
+    def _supports_template_kw(template_processor: Any, name: str) -> bool:
+        try:
+            signature = inspect.signature(template_processor.apply_chat_template)
+        except (TypeError, ValueError):
+            return False
+
+        return name in signature.parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+
     try:
         template_processor = None
         if (
@@ -635,12 +648,18 @@ def get_chat_template(
         if template_processor is None:
             return _messages_to_plain_prompt()
 
+        template_kwargs = dict(kwargs)
+        if "enable_thinking" not in template_kwargs and _supports_template_kw(
+            template_processor, "enable_thinking"
+        ):
+            template_kwargs["enable_thinking"] = False
+
         try:
             return template_processor.apply_chat_template(
                 messages,
                 tokenize=tokenize,
                 add_generation_prompt=add_generation_prompt,
-                **kwargs,
+                **template_kwargs,
             )
         except ValueError as e:
             if chat_template_override is None and _missing_template_error(e):

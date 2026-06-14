@@ -20,6 +20,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from . import apc as _apc
+from . import diffusion_generate
 from .models import cache
 from .prompt_utils import apply_chat_template
 from .tokenizer_utils import make_streaming_detokenizer
@@ -34,7 +35,7 @@ from .utils import (
 
 logger = logging.getLogger("xmlx_vlm.generate")
 
-DEFAULT_MODEL_PATH = "mlx-community/nanoLLaVA-1.5-8bit"
+DEFAULT_MODEL_PATH = "mlx-community/diffusiongemma-26B-A4B-it-4bit"
 DEFAULT_IMAGE = None
 DEFAULT_AUDIO = None
 DEFAULT_VIDEO = None
@@ -1585,6 +1586,22 @@ def stream_generate(
         }
         kwargs.update(data_kwargs)
 
+    # Diffusion model dispatch: block-diffusion models (e.g. DiffusionGemma)
+    # run their own denoising loop instead of the autoregressive step generator.
+    if diffusion_generate.is_diffusion_model(model):
+        yield from diffusion_generate.stream_diffusion_generate_from_kwargs(
+            model,
+            processor,
+            tokenizer,
+            input_ids,
+            pixel_values,
+            mask,
+            skip_special_token_ids,
+            kwargs,
+            prompt_cache_state=prompt_cache_state,
+        )
+        return
+
     # Vision feature caching: reuse cached image features across turns
     if vision_cache is not None and image is not None and pixel_values is not None:
         cached = vision_cache.get(image)
@@ -1612,24 +1629,36 @@ def stream_generate(
         image_hash = _apc.hash_image_payload(pixel_values=pixel_values, image_ref=image)
         apc_extra_hash = _apc.tenant_scoped_hash(apc_tenant, image_hash)
 
+    # Media-aware APC helpers: a reusable prefix is only safe when the suffix
+    # is text-only, because restored KV still carries full image/video features.
+    multimodal_token_ids = _apc.multimodal_token_ids_from_config(model.config)
+    apc_safe_prefix_min = _apc.media_safe_prefix_min(
+        full_input_ids_list, multimodal_token_ids
+    )
+    apc_safe_prefix_lookup_min = max(0, apc_safe_prefix_min - 1)
+
+    def _apc_suffix_is_text_only(prefix_len: int) -> bool:
+        return _apc.prefix_leaves_text_only_suffix(
+            full_input_ids_list, prefix_len, multimodal_token_ids
+        )
+
+    def _apc_prefix_has_media_tokens(prefix_len: int) -> bool:
+        return _apc.prefix_contains_media_tokens(
+            full_input_ids_list, prefix_len, multimodal_token_ids
+        )
+
     if prompt_cache_state is not None and prompt_cache_state.cache is not None:
         prefix_len = prompt_cache_state.find_prefix_length(full_input_ids_list)
         if prefix_len > 0 and prefix_len < input_ids.shape[1]:
-            if _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
+            if _apc_suffix_is_text_only(
+                prefix_len
+            ) and _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
                 reused_prefix_len = prefix_len
                 # Trim to only new tokens
                 input_ids = input_ids[:, prefix_len:]
-                # Only skip vision if no image tokens in the new (trimmed) tokens
-                image_token_id = getattr(
-                    model.config, "image_token_id", None
-                ) or getattr(model.config, "image_token_index", None)
-                new_ids = input_ids.flatten().tolist()
-                has_image_in_new = (
-                    image_token_id is not None and image_token_id in new_ids
-                )
-                if not has_image_in_new:
-                    pixel_values = None
-                    kwargs.pop("cached_image_features", None)
+                # Suffix is text-only, so vision features are not needed.
+                pixel_values = None
+                kwargs.pop("cached_image_features", None)
                 # Reuse the saved KV cache (trimmed to prefix length)
                 kv_cache = prompt_cache_state.cache
                 # Trim cache to prefix_len in case it includes generated tokens
@@ -1650,34 +1679,35 @@ def stream_generate(
             exact_prompt_cache, exact_prefix_len, _exact_logits = apc_manager.lookup_exact_cache(
                 full_input_ids_list,
                 extra_hash=apc_extra_hash,
+                min_prefix_tokens=apc_safe_prefix_lookup_min,
             )
             if (
                 exact_prompt_cache is not None
                 and exact_prefix_len > 0
                 and exact_prefix_len < input_ids.shape[1]
+                and _apc_suffix_is_text_only(exact_prefix_len)
                 and _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs)
             ):
                 reused_prefix_len = exact_prefix_len
                 input_ids = input_ids[:, exact_prefix_len:]
-                image_token_id = getattr(
-                    model.config, "image_token_id", None
-                ) or getattr(model.config, "image_token_index", None)
-                new_ids = input_ids.flatten().tolist()
-                if image_token_id is None or image_token_id not in new_ids:
-                    pixel_values = None
-                    kwargs.pop("cached_image_features", None)
+                pixel_values = None
+                kwargs.pop("cached_image_features", None)
                 kwargs["prompt_cache"] = exact_prompt_cache
         else:
             matched_blocks, prefix_len = apc_manager.lookup_prefix(
                 full_input_ids_list, extra_hash=apc_extra_hash
             )
+            if prefix_len > 0 and _apc_prefix_has_media_tokens(prefix_len):
+                apc_manager.release(matched_blocks)
+                matched_blocks = []
+                prefix_len = 0
             exact_prompt_cache = None
             exact_prefix_len = 0
             if prefix_len < input_ids.shape[1]:
                 exact_prompt_cache, exact_prefix_len, _exact_logits = apc_manager.lookup_exact_cache(
                     full_input_ids_list,
                     extra_hash=apc_extra_hash,
-                    min_prefix_tokens=prefix_len,
+                    min_prefix_tokens=max(prefix_len, apc_safe_prefix_lookup_min),
                 )
             disk_prompt_cache = None
             disk_prefix_len = 0
@@ -1686,7 +1716,9 @@ def stream_generate(
                     apc_manager.lookup_prefix_disk_cache(
                         full_input_ids_list,
                         extra_hash=apc_extra_hash,
-                        min_prefix_tokens=max(prefix_len, exact_prefix_len),
+                        min_prefix_tokens=max(
+                            prefix_len, exact_prefix_len, apc_safe_prefix_lookup_min
+                        ),
                         allow_memory_overlap=max(prefix_len, exact_prefix_len) > 0,
                     )
                 )
@@ -1696,45 +1728,36 @@ def stream_generate(
             ):
                 if matched_blocks:
                     apc_manager.release(matched_blocks)
-                if _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
+                if _apc_suffix_is_text_only(
+                    disk_prefix_len
+                ) and _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
                     reused_prefix_len = disk_prefix_len
                     input_ids = input_ids[:, disk_prefix_len:]
-                    image_token_id = getattr(
-                        model.config, "image_token_id", None
-                    ) or getattr(model.config, "image_token_index", None)
-                    new_ids = input_ids.flatten().tolist()
-                    if image_token_id is None or image_token_id not in new_ids:
-                        pixel_values = None
-                        kwargs.pop("cached_image_features", None)
+                    pixel_values = None
+                    kwargs.pop("cached_image_features", None)
                     kwargs["prompt_cache"] = disk_prompt_cache
             elif (
                 exact_prefix_len > prefix_len and exact_prefix_len < input_ids.shape[1]
             ):
                 if matched_blocks:
                     apc_manager.release(matched_blocks)
-                if _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
+                if _apc_suffix_is_text_only(
+                    exact_prefix_len
+                ) and _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
                     reused_prefix_len = exact_prefix_len
                     input_ids = input_ids[:, exact_prefix_len:]
-                    image_token_id = getattr(
-                        model.config, "image_token_id", None
-                    ) or getattr(model.config, "image_token_index", None)
-                    new_ids = input_ids.flatten().tolist()
-                    if image_token_id is None or image_token_id not in new_ids:
-                        pixel_values = None
-                        kwargs.pop("cached_image_features", None)
+                    pixel_values = None
+                    kwargs.pop("cached_image_features", None)
                     kwargs["prompt_cache"] = exact_prompt_cache
             elif prefix_len > 0 and prefix_len < input_ids.shape[1]:
-                if _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
+                if _apc_suffix_is_text_only(
+                    prefix_len
+                ) and _prime_cached_prefix_rope_state(model, input_ids, mask, kwargs):
                     apc_blocks_in_use = matched_blocks
                     reused_prefix_len = prefix_len
                     input_ids = input_ids[:, prefix_len:]
-                    image_token_id = getattr(
-                        model.config, "image_token_id", None
-                    ) or getattr(model.config, "image_token_index", None)
-                    new_ids = input_ids.flatten().tolist()
-                    if image_token_id is None or image_token_id not in new_ids:
-                        pixel_values = None
-                        kwargs.pop("cached_image_features", None)
+                    pixel_values = None
+                    kwargs.pop("cached_image_features", None)
                     kwargs["prompt_cache"] = _apc.make_warm_kv_cache(
                         matched_blocks,
                         min_capacity_tokens=prefix_len + input_ids.shape[1] + 1,
@@ -1779,10 +1802,14 @@ def stream_generate(
         exact_checkpoint_len = None
         exact_checkpoint = None
         if apc_manager is not None and apc_mode == "exact" and reused_prefix_len == 0:
-            exact_checkpoint_len = max(
-                1,
+            exact_checkpoint_len = _apc.adjust_prefix_to_text_suffix_boundary(
+                full_input_ids_list,
                 len(full_input_ids_list) - apc_manager.exact_cache_guard_tokens,
+                multimodal_token_ids,
+                max_prefix_tokens=len(full_input_ids_list) - 1,
             )
+            if exact_checkpoint_len <= 0:
+                exact_checkpoint_len = None
 
             def exact_checkpoint(prefix_len: int, prompt_cache: List[Any]) -> None:
                 apc_manager.store_exact_cache(
@@ -3192,6 +3219,39 @@ class BatchGenerator:
         tenant = prompt_kwargs.get("_apc_tenant")
         return _apc.tenant_scoped_hash(tenant, img)
 
+    def _apc_media_token_ids(self) -> set[int]:
+        return _apc.multimodal_token_ids_from_config(self.model.config)
+
+    def _apc_safe_prefix_lookup_min(self, ids_list: List[int]) -> int:
+        safe_min = _apc.media_safe_prefix_min(ids_list, self._apc_media_token_ids())
+        return max(0, safe_min - 1)
+
+    def _apc_suffix_is_text_only(self, ids_list: List[int], prefix_len: int) -> bool:
+        return _apc.prefix_leaves_text_only_suffix(
+            ids_list,
+            prefix_len,
+            self._apc_media_token_ids(),
+        )
+
+    def _apc_prefix_has_media_tokens(
+        self, ids_list: List[int], prefix_len: int
+    ) -> bool:
+        return _apc.prefix_contains_media_tokens(
+            ids_list,
+            prefix_len,
+            self._apc_media_token_ids(),
+        )
+
+    def _apc_exact_checkpoint_len(self, ids_list: List[int]) -> int:
+        if self.apc_manager is None or getattr(self, "apc_mode", "block") != "exact":
+            return 0
+        return _apc.adjust_prefix_to_text_suffix_boundary(
+            ids_list,
+            len(ids_list) - self.apc_manager.exact_cache_guard_tokens,
+            self._apc_media_token_ids(),
+            max_prefix_tokens=len(ids_list) - 1,
+        )
+
     def _apc_pick_for(self, sequence) -> Optional[dict]:
         """Look up an APC prefix for ``sequence``. Returns dict with matched
         blocks + suffix metadata when there is a usable hit, else None.
@@ -3201,27 +3261,21 @@ class BatchGenerator:
         uid, ids_list, max_toks, prompt_kwargs, lps = sequence
         if not ids_list or len(ids_list) < 2:
             return None
-        # v1/v2: don't trim a prefix that contains image tokens — re-running
-        # vision merging on the suffix is the cheap path here.
-        image_token_id = getattr(self.model.config, "image_token_id", None) or getattr(
-            self.model.config, "image_token_index", None
-        )
+        safe_lookup_min = self._apc_safe_prefix_lookup_min(ids_list)
         extra_hash = self._apc_extra_hash(prompt_kwargs or {})
         apc_mode = getattr(self, "apc_mode", "block")
         if apc_mode == "exact":
             exact_cache, exact_prefix_len, _exact_logits = self.apc_manager.lookup_exact_cache(
                 ids_list,
                 extra_hash=extra_hash,
+                min_prefix_tokens=safe_lookup_min,
             )
             if (
                 exact_cache is not None
                 and exact_prefix_len > 0
                 and exact_prefix_len < len(ids_list)
             ):
-                if (
-                    image_token_id is not None
-                    and image_token_id in ids_list[:exact_prefix_len]
-                ):
+                if not self._apc_suffix_is_text_only(ids_list, exact_prefix_len):
                     return None
                 return {
                     "matched_blocks": [],
@@ -3234,13 +3288,17 @@ class BatchGenerator:
         matched, prefix_len = self.apc_manager.lookup_prefix(
             ids_list, extra_hash=extra_hash
         )
+        if prefix_len > 0 and self._apc_prefix_has_media_tokens(ids_list, prefix_len):
+            self.apc_manager.release(matched)
+            matched = []
+            prefix_len = 0
         exact_cache = None
         exact_prefix_len = 0
         if prefix_len < len(ids_list):
             exact_cache, exact_prefix_len, _exact_logits = self.apc_manager.lookup_exact_cache(
                 ids_list,
                 extra_hash=extra_hash,
-                min_prefix_tokens=prefix_len,
+                min_prefix_tokens=max(prefix_len, safe_lookup_min),
             )
         warm_cache = None
         disk_prefix_len = 0
@@ -3248,7 +3306,7 @@ class BatchGenerator:
             warm_cache, disk_prefix_len = self.apc_manager.lookup_prefix_disk_cache(
                 ids_list,
                 extra_hash=extra_hash,
-                min_prefix_tokens=max(prefix_len, exact_prefix_len),
+                min_prefix_tokens=max(prefix_len, exact_prefix_len, safe_lookup_min),
                 allow_memory_overlap=max(prefix_len, exact_prefix_len) > 0,
             )
         if disk_prefix_len > max(
@@ -3256,10 +3314,7 @@ class BatchGenerator:
         ) and disk_prefix_len < len(ids_list):
             if matched:
                 self.apc_manager.release(matched)
-            if (
-                image_token_id is not None
-                and image_token_id in ids_list[:disk_prefix_len]
-            ):
+            if not self._apc_suffix_is_text_only(ids_list, disk_prefix_len):
                 return None
             return {
                 "matched_blocks": [],
@@ -3271,10 +3326,7 @@ class BatchGenerator:
         if exact_prefix_len > prefix_len and exact_prefix_len < len(ids_list):
             if matched:
                 self.apc_manager.release(matched)
-            if (
-                image_token_id is not None
-                and image_token_id in ids_list[:exact_prefix_len]
-            ):
+            if not self._apc_suffix_is_text_only(ids_list, exact_prefix_len):
                 return None
             return {
                 "matched_blocks": [],
@@ -3284,7 +3336,7 @@ class BatchGenerator:
                 "full_input_ids": list(ids_list),
             }
         if prefix_len > 0 and prefix_len < len(ids_list):
-            if image_token_id is not None and image_token_id in ids_list[:prefix_len]:
+            if not self._apc_suffix_is_text_only(ids_list, prefix_len):
                 self.apc_manager.release(matched)
                 return None
             return {
@@ -3414,14 +3466,7 @@ class BatchGenerator:
                     else self._apc_extra_hash(prompt_kwargs_list[i] or {})
                 ),
                 "apc_blocks": picks[i].get("matched_blocks", []) if picks[i] else [],
-                "checkpoint_len": (
-                    max(
-                        1,
-                        len(full_ids[i]) - self.apc_manager.exact_cache_guard_tokens,
-                    )
-                    if apc_mode == "exact"
-                    else 0
-                ),
+                "checkpoint_len": self._apc_exact_checkpoint_len(full_ids[i]),
             }
             for i in range(len(sequences))
         ]
@@ -3465,14 +3510,7 @@ class BatchGenerator:
                     "prefix_len": 0,
                     "extra_hash": extra_hash,
                     "apc_blocks": [],
-                    "checkpoint_len": (
-                        max(
-                            1,
-                            len(ids_list) - self.apc_manager.exact_cache_guard_tokens,
-                        )
-                        if getattr(self, "apc_mode", "block") == "exact"
-                        else 0
-                    ),
+                    "checkpoint_len": self._apc_exact_checkpoint_len(list(ids_list)),
                 }
             )
         return meta

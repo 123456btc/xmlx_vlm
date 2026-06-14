@@ -11,7 +11,8 @@ from xmlx_vlm.mcp.types import MCPToolResult
 
 
 class TestToolExecutorParallel(unittest.TestCase):
-    def test_handle_calls_async_runs_in_parallel(self):
+    @patch("xmlx_vlm.mcp.executor.security.is_tool_allowed", return_value=True)
+    def test_handle_calls_async_runs_in_parallel(self, _mock_is_allowed):
         """Built-in tools execute in parallel via asyncio.to_thread."""
         executor = ToolExecutor()
         call_order = []

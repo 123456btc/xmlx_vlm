@@ -4,7 +4,7 @@ MLX-VLM model benchmark for coding/development.
 
 Measures TTFT, TPOT, TPS and memory usage for text generation.
 Usage:
-    python -m xmlx_vlm.bench --model mlx-community/Qwen3-8B-4bit
+    python -m xmlx_vlm.bench --model mlx-community/diffusiongemma-26B-A4B-it-4bit
     python -m xmlx_vlm.bench --model mlx-community/Llama-3.2-3B-Instruct-4bit --prompts 10 --max-tokens 512
 """
 

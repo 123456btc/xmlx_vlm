@@ -1,0 +1,143 @@
+{
+  "positions": {},
+  "trades": [
+    {
+      "timestamp": 1781421063.621491,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781421104.424695,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781421686.3799748,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781421692.552135,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781421711.293931,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781421815.140532,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781422254.470297,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781428996.8727129,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781429149.37953,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 100.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781429349.3789508,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781429390.375396,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781430039.179195,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781430057.3843699,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781430240.427209,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781430267.266489,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781430497.106318,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    },
+    {
+      "timestamp": 1781430598.178782,
+      "symbol": "BTC/USDT",
+      "side": "buy",
+      "qty": 0.01,
+      "price": 64.0,
+      "mode": "paper"
+    }
+  ],
+  "daily_pnl": 0.0,
+  "last_day": "2026-06-14"
+}
