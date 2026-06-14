@@ -59,7 +59,7 @@ AFRE 研究**市场因子的谱系**：它们为什么被发明、如何传播�
 
 | 领域 | 敏感数据 | XMLX-VLM 在本地做什么 |
 |------|---------|---------------------|
-| **量化金融** |  proprietary 因子、内部研报、alpha 信号 | 本地解析 PDF 研报和图表；推理因子假设；输出结构化因子定义；通过 MCP 调用本地回测工具 |
+| **量化金融** |  proprietary 因子、内部研报、alpha 信号 | 本地解析 PDF 研报和图表；推理因子假设；输出结构化因子定义；通过 MCP 调用本地回测工具；AI Trader 本地分析 Hyperliquid 行情与交易 |
 | **法律** | 案件卷宗、合同、证据材料、客户沟通记录 | 分析扫描文档和证据图片；提取结构化条款；推理法律论证；生成批注摘要 |
 | **政务** | 涉密简报、政策草案、公民档案、情报图像 | 处理敏感图像和扫描文档；结构化情报报告输出；完整审计轨迹保留在本地硬件 |
 | **医疗** | 患者病历、医学影像、临床笔记、检验结果 | 解析医疗文档图片；推理鉴别诊断；结构化临床摘要输出；架构层面 HIPAA 合规 |
@@ -76,6 +76,7 @@ AFRE 研究**市场因子的谱系**：它们为什么被发明、如何传播�
 | **双协议 API** | 一个 Server 同时说 OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两种协议。作为 Cursor、Claude Code、LangChain、PydanticAI 的后端——全部流量留在 `localhost:8080`。 |
 | **本地工具调用 & MCP** | 通过 MCP 连接本地数据库、回测器、电子病历系统、案件管理工具、文档流水线。模型调用你的工具；你的数据永不离开机器。 |
 | **Embedding & Rerank 用于私有知识** | 索引内部文档、研究笔记、案件卷宗、患者病史。在你的专有知识库上做语义搜索——零云端暴露。 |
+| **AI Trader（本地量化助手）** | 与本地 AI 交易助手对话，基于 Hyperliquid L1/L2/衍生品数据与 5m/15m/1h 多周期分析行情，本地渲染图表并模拟交易。 |
 | **SSD 持久化前缀缓存** | 重复分析同一文档或系统 prompt 时毫秒级 warm-start，即使 server 重启后也是如此。缓存活在你的 SSD 上，不是别人的服务器。 |
 | **Gradio Chat UI** | 一条命令启动（`--chat`），用于本地 demo、内部评审会议、安全内部工具。 |
 | **Service Manager** | `service.sh` 一键守护进程化，含健康检查、日志轮转、端口管理、零停机重启。 |
@@ -163,7 +164,8 @@ IDLE ──► THINKING ──► TRANSITIONING ──► CONTENT
                               │
 ┌─────────────────────────────────────────────────────────────┐
 │                     私有 AI Agent & 客户端                    │
-│  (Cursor、Claude Code、LangChain、PydanticAI、AFRE agents)   │
+│  (Cursor、Claude Code、LangChain、PydanticAI、AFRE agents、  │
+│   AI Trader — 本地量化助手)                                  │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
@@ -266,6 +268,21 @@ curl http://localhost:8080/v1/chat/completions \
     "stream": true
   }'
 ```
+
+### 启动 AI Trader（本地量化助手）
+
+```bash
+# 先启动服务
+./service.sh start
+
+# 与本地交易助手对话
+xmlx_vlm.ai-trader
+
+# 或执行单条指令
+xmlx_vlm.ai-trader --prompt "分析 BTC 走势"
+```
+
+AI Trader 统一使用 Hyperliquid 数据源，支持 5m/15m/1h 多周期分析、L2 订单簿深度、逐笔成交流、资金费率与持仓量查询，全部在本地完成。
 
 ---
 
