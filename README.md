@@ -76,6 +76,7 @@ While AFRE represents XMLX-VLM's flagship implementation in quantitative finance
 | **Dual-Protocol API** | One server speaks both OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) protocols. Drop in as the backend for Cursor, Claude Code, LangChain, PydanticAI — all traffic stays on `localhost:8080`. |
 | **Local Tool Calling & MCP** | Connect to local databases, backtesters, EHR systems, case-management tools, and document pipelines via MCP. The model calls your tools; your data never leaves the machine. |
 | **Embedding & Rerank for Private Knowledge** | Index internal documents, research notes, case files, and patient histories. Semantic search over your proprietary knowledge base — with zero cloud exposure. |
+| **AI Trader (Local Quant Assistant)** | Chat with a local AI trading assistant that analyzes crypto through Hyperliquid L1/L2/derivatives data across 5m/15m/1h timeframes, renders charts, and simulates trades — all on your machine. |
 | **SSD-Persistent Prefix Cache** | Repeated analysis of the same document or system prompt warm-starts in milliseconds, even after server restart. The cache lives on your SSD, not someone else's server. |
 | **Gradio Chat UI** | One-command launch (`--chat`) for local demos, internal review sessions, and secure internal tooling. |
 | **Service Manager** | `service.sh` handles daemonization, health checks, log rotation, port management, and zero-downtime restarts. |
@@ -160,7 +161,8 @@ Dynamic top-k override lets you trade a fraction of accuracy for latency wins in
                               │
 ┌─────────────────────────────────────────────────────────────┐
 │                  Private AI Agents & Clients                 │
-│  (Cursor, Claude Code, LangChain, PydanticAI, AFRE agents)  │
+│  (Cursor, Claude Code, LangChain, PydanticAI, AFRE agents,  │
+│   AI Trader — local quant assistant)                        │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
@@ -264,6 +266,21 @@ curl http://localhost:8080/v1/chat/completions \
     "stream": true
   }'
 ```
+
+### Launch AI Trader (Local Quant Assistant)
+
+```bash
+# Start the server first
+./service.sh start
+
+# Chat with your local trading assistant
+xmlx_vlm.ai-trader
+
+# Or run a single prompt
+xmlx_vlm.ai-trader --prompt "分析 BTC 走势"
+```
+
+AI Trader uses Hyperliquid market data across 5m/15m/1h timeframes, L2 order book depth, trade flow, funding, and open interest — all locally.
 
 ---
 

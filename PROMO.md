@@ -64,6 +64,7 @@ SSD-persistent prefix cache ✅
 Dual-protocol API ✅
 MCP tool calling ✅
 Embedding + Rerank ✅
+AI Trader（本地量化助手）✅
 
 【8/8】CTA 帖
 开源。MIT。
@@ -100,6 +101,7 @@ XMLX-VLM 解法：
 → Thinking 模式推理因子失效假设
 → JSON Schema 输出标准化因子定义
 → MCP 调用本地回测引擎
+→ AI Trader 实时分析 Hyperliquid 行情、盘口、资金费率，本地做决策
 
 全程零网络调用。你的 alpha，永远只属于你。
 
@@ -181,6 +183,7 @@ SSD-persistent prefix cache ✅
 Dual-protocol API ✅
 MCP tool calling ✅
 Embedding + Rerank ✅
+AI Trader (local quant assistant) ✅
 
 【8/8】
 Open source. MIT.
@@ -255,6 +258,189 @@ XMLX-VLM 让你把 Vision-Language 模型完整跑在 Mac 上。研报、病历�
 
 https://github.com/123456btc/xmlx_vlm
 
+
+---
+
+## 方案 K：AI Trader 本地量化助手版（中文 Thread，8 条）
+
+【1/8】钩子帖
+你把 K 线图、盘口、资金费率截图发给云端 AI 分析，
+
+它不光"看见"了你的策略思路，还可能把它变成下一版模型的"常识"。
+
+量化人的数据主权，从本地行情大脑开始。
+
+🧵
+
+【2/8】定位帖
+XMLX-VLM 新增 AI Trader
+
+= Apple Silicon 上的私有化量化分析助手
+
+✅ 统一 Hyperliquid 数据源
+✅ 5m / 15m / 1h 多周期聚合
+✅ L2 订单簿 + 逐笔成交流 + 资金费率 + 持仓量
+✅ 本地绘图 + 纸盘模拟
+
+你的 Mac = 行情终端 + 研究员 + 风控台。
+
+【3/8】数据源帖
+不是"接了个交易所 API"那么简单。
+
+AI Trader 从 Hyperliquid 实时拉取：
+→ 最新价 / 24h 高低点 / 成交量
+→ L2 买卖深度、spread、深度失衡率
+→ 主动买/卖压力、大单识别
+→ 资金费率、持仓量、premium
+
+机构级数据，零网络泄露。
+
+【4/8】多周期帖
+只看 1h 就做判断？那是散户行为。
+
+AI Trader 默认同时分析：
+→ 5m：短线情绪
+→ 15m：中短线结构
+→ 1h：趋势结构
+
+三周期共振才出信号，分歧就喊观望。
+
+【5/8】工具调用帖
+你说"分析一下 ETH"，它不是聊天回复，而是：
+
+1. 调用 get_multi_timeframe_summary
+2. 调用 get_market_summary
+3. 本地渲染 K 线图
+4. 输出结构化分析 + 交易建议
+
+模型自己决定查什么、画什么、算什么。
+
+【6/8】隐私安全帖
+行情数据、持仓逻辑、策略偏好——
+
+在云 API 里跑一遍，就是一份不可撤销的数据赠与。
+
+AI Trader 全部本地推理：
+→ 行情不过第三方节点
+→ 图表不在云端生成
+→ 纸盘状态存在本地日志
+
+你的 alpha，连路由器都不经过。
+
+【7/8】使用帖
+```bash
+./service.sh start
+xmlx_vlm.ai-trader
+```
+
+然后直接聊：
+- "BTC 现在多少钱？"
+- "画一张 ETH 1小时 K 线图"
+- "看看盘口买卖失衡吗"
+- "模拟买入 0.01 BTC"
+
+5 分钟，你的 Mac 变成私有量化工作站。
+
+【8/8】CTA 帖
+开源。MIT。
+
+git clone → pip install → ./service.sh start → xmlx_vlm.ai-trader
+
+本地行情、本地分析、本地决策。
+
+https://github.com/123456btc/xmlx_vlm
+
+---
+
+## 方案 L：AI Trader English Thread（8 posts）
+
+【1/8】
+Every chart, order-book screenshot, and funding-rate question you send to a cloud AI is a data donation.
+
+Your edge becomes their training data.
+
+Local quant intelligence isn't nostalgia. It's survival.
+
+🧵
+
+【2/8】
+Meet AI Trader on XMLX-VLM.
+
+= Private quant assistant running on Apple Silicon
+
+✅ Unified Hyperliquid data feed
+✅ 5m / 15m / 1h multi-timeframe analysis
+✅ L2 order book, trade flow, funding, open interest
+✅ Local chart rendering + paper trading
+
+Your Mac = terminal + researcher + risk desk.
+
+【3/8】
+Not just "an exchange API wrapper".
+
+AI Trader pulls from Hyperliquid in real time:
+→ ticker, 24h range, volume
+→ L2 depth, spread, depth imbalance
+→ buy/sell pressure, whale-trade detection
+→ funding rate, open interest, premium
+
+Institutional-grade data. Zero network leakage.
+
+【4/8】
+Analyzing on a single timeframe is amateur.
+
+AI Trader defaults to three:
+→ 5m: short-term sentiment
+→ 15m: intraday structure
+→ 1h: trend structure
+
+Only aligned signals get published. Divergence = wait.
+
+【5/8】
+Say "analyze ETH" and it doesn't just chat.
+
+It calls:
+1. get_multi_timeframe_summary
+2. get_market_summary
+3. render_chart locally
+4. emits structured analysis + trade suggestion
+
+The model decides what to query, plot, and compute.
+
+【6/8】
+Your market data, your position logic, your strategy bias —
+
+Running it through a cloud API is an irreversible data gift.
+
+AI Trader runs everything locally:
+→ no third-party market-data node
+→ no cloud chart generation
+→ paper state stored in local logs
+
+Your alpha never touches a router.
+
+【7/8】
+```bash
+./service.sh start
+xmlx_vlm.ai-trader
+```
+
+Then just chat:
+- "What's BTC at?"
+- "Draw ETH 1h chart"
+- "Is order book imbalanced?"
+- "Paper trade 0.01 BTC"
+
+5 minutes. Your Mac becomes a private quant workstation.
+
+【8/8】
+Open source. MIT.
+
+git clone → pip install → ./service.sh start → xmlx_vlm.ai-trader
+
+Local data. Local analysis. Local decisions.
+
+https://github.com/123456btc/xmlx_vlm
 
 ---
 
