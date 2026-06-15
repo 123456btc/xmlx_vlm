@@ -1,11 +1,11 @@
 # XMLX-VLM
 
 <p align="center">
-  <strong>Privacy-First Local Vision-Language AI</strong>
+  <strong>Privacy-First Local Vision-Language AI & Institutional-Grade Fully Private Local Quantitative Trading Platform</strong>
 </p>
 
 <p align="center">
-  <em>Apple Silicon-native inference engine. Zero data leaves your machine. Zero exposure to cloud APIs.</em>
+  <em>Apple Silicon-native inference engine. Zero data leaves your machine. Designed for highly sensitive document parsing and completely private local AI algorithmic/model trading.</em>
 </p>
 
 <p align="center">

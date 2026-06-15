@@ -1,11 +1,11 @@
 # XMLX-VLM
 
 <p align="center">
-  <strong>プライバシー優先のローカルVision-Language AI</strong>
+  <strong>プライバシー優先のローカルVision-Language AI & 機関投資家向け完全非公開型ローカルモデル量化取引システム</strong>
 </p>
 
 <p align="center">
-  <em>Apple Siliconネイティブ推論エンジン。データが外部に一切流出しない。クラウドAPIへの一切の露出なし。</em>
+  <em>Apple Siliconネイティブ推論エンジン。外部流出ゼロ。機密文書の解析や、セキュリティに特化したローカルAIアルゴリズム・クオンツ取引向けに設計。</em>
 </p>
 
 <p align="center">

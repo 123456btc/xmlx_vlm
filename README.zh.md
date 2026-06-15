@@ -1,11 +1,11 @@
 # XMLX-VLM
 
 <p align="center">
-  <strong>隐私优先的本地视觉语言 AI</strong>
+  <strong>隐私优先的本地视觉语言 AI 与机构级全隐私本地化模型量化交易平台</strong>
 </p>
 
 <p align="center">
-  <em>Apple Silicon 原生推理引擎。数据零外泄。零云 API 暴露。</em>
+  <em>Apple Silicon 原生推理引擎。数据零外泄，零云 API 暴露。专为高机密文档解析与全隐私本地 AI 量化交易量身定制。</em>
 </p>
 
 <p align="center">

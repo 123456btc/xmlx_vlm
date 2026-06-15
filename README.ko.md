@@ -1,11 +1,11 @@
 # XMLX-VLM
 
 <p align="center">
-  <strong>프라이버시 중심의 로컬 비전-언어 AI</strong>
+  <strong>프라이버시 중심의 로컬 비전-언어 AI 및 기관급 완전 비공개 로컬 모델 양적 트레이딩 시스템</strong>
 </p>
 
 <p align="center">
-  <em>Apple Silicon 네이티브 추론 엔진. 데이터가 기기를 벗어나지 않습니다. 클라우드 API 노출은 제로입니다.</em>
+  <em>Apple Silicon 네이티브 추론 엔진. 데이터 기기 외 유출 제로. 고도 보안 문서 파싱 및 프라이버시가 보호되는 로컬 AI 알고리즘·퀀트 투자 플랫폼.</em>
 </p>
 
 <p align="center">
