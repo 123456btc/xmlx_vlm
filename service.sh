@@ -39,6 +39,10 @@ EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
 DRAFT_MODEL="${XMLX_VLM_DRAFT_MODEL:-}"
 DRAFT_KIND="${XMLX_VLM_DRAFT_KIND:-dflash}"
 
+# Default TurboQuant config
+KV_BITS="${XMLX_VLM_KV_BITS:-3.5}"
+KV_QUANT_SCHEME="${XMLX_VLM_KV_QUANT_SCHEME:-turboquant}"
+
 # Default to launching chat UI alongside the server.
 # Set XMLX_VLM_CHAT=false (or use --no-chat) to start server only.
 CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
@@ -155,6 +159,7 @@ cmd_start() {
         echo "  Port:  ${PORT}"
         [[ -n "$API_KEY" ]] && echo "  Auth:  enabled"
         [[ -n "$DRAFT_MODEL" ]] && echo "  Draft: ${DRAFT_MODEL} (${DRAFT_KIND})"
+        [[ -n "$KV_BITS" ]] && echo "  KV:    ${KV_BITS} bits (${KV_QUANT_SCHEME})"
         [[ ${#SERVER_OPTS[@]} -gt 0 ]] && echo "  Extra: ${SERVER_OPTS[*]}"
         [[ -n "$EXTRA_ARGS" ]] && echo "  Env:   ${EXTRA_ARGS}"
 
@@ -167,6 +172,21 @@ cmd_start() {
         # Default speculative decoding (user can override via SERVER_OPTS)
         [[ -n "$DRAFT_MODEL" ]] && server_args+=(--draft-model "$DRAFT_MODEL")
         [[ -n "$DRAFT_KIND" ]] && server_args+=(--draft-kind "$DRAFT_KIND")
+        # Default TurboQuant KV Cache quantization (user can override via SERVER_OPTS)
+        local has_kv_bits=false
+        local has_kv_scheme=false
+        if [[ ${#SERVER_OPTS[@]} -gt 0 ]]; then
+            for opt in "${SERVER_OPTS[@]}"; do
+                [[ "$opt" == "--kv-bits" ]] && has_kv_bits=true
+                [[ "$opt" == "--kv-quant-scheme" ]] && has_kv_scheme=true
+            done
+        fi
+        if [[ "$has_kv_bits" == false ]]; then
+            [[ -n "$KV_BITS" ]] && server_args+=(--kv-bits "$KV_BITS")
+        fi
+        if [[ "$has_kv_scheme" == false ]]; then
+            [[ -n "$KV_QUANT_SCHEME" ]] && server_args+=(--kv-quant-scheme "$KV_QUANT_SCHEME")
+        fi
         [[ ${#SERVER_OPTS[@]} -gt 0 ]] && server_args+=("${SERVER_OPTS[@]}")
         [[ -n "$EXTRA_ARGS" ]] && read -ra extra <<< "$EXTRA_ARGS" && server_args+=("${extra[@]}")
 
