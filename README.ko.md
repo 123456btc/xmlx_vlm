@@ -73,12 +73,12 @@ AFRE는 XMLX-VLM의 퀀트 금융 분야 대표 구현 사례지만, 동일한 �
 |------------|-------------|
 | **로컬 문서 인텔리전스** | PDF, 스캔 문서, 스크린샷, 이미지 중심 보고서를 모델에 직접 입력. OCR SaaS 불필요. 클라우드 비전 API 불필요. 문서가 localhost를 벗어나지 않습니다. |
 | **추론이 포함된 구조화된 출력** | 깊은 추론을 위해 `thinking` 모드를 활성화한 후 최종 출력에 JSON-Schema 제약을 적용. 감사 준비 보고서, 팩터 정의, 임상 요약에 적합합니다. |
-| **듀얼 프로토콜 API** | 하나의 서버가 OpenAI(`/v1/chat/completions`)와 Anthropic(`/v1/messages`) 프로토콜을 모두 지원. Cursor, Claude Code, LangChain, PydanticAI의 백엔드로 바로 연결 — 모든 트래픽이 `localhost:8080`에 머무릅니다. |
+| **듀얼 프로토콜 API** | 하나의 서버가 OpenAI(`/v1/chat/completions`)와 Anthropic(`/v1/messages`) 프로토콜을 모두 지원. Cursor, Claude Code, LangChain, PydanticAI의 백엔드로 바로 연결 — 모든 트래픽이 `localhost:5118`에 머무릅니다. |
 | **로컬 도구 호출 및 MCP** | 로컬 데이터베이스, 백테스터, EHR 시스템, 사건 관리 도구, 문서 파이프라인을 MCP로 연결. 모델이 도구를 호출하고, 데이터는 기기를 벗어나지 않습니다. |
 | **프라이빗 지식을 위한 임베딩 및 리랭크** | 내부 문서, 연구 노트, 사건 파일, 환자 이력을 색인. 독점 지식 베이스 위의 시맨틱 검색 — 클라우드 노출 제로. |
 | **AI Trader（로컬 퀀트 어시스턴트）** | Hyperliquid의 L1/L2/파생상품 데이터와 5m/15m/1h 멀티 타임프레임 분석을 기반으로 로컬에서 차트를 렌더링하고 모의 거래할 수 있는 AI 어시스턴트와 대화. |
 | **SSD 영구 프리픽스 캐시** | 동일한 문서나 시스템 프롬프트를 반복 분석할 때 밀리초 내로 웜 스타트, 서버 재시작 후에도. 캐시는 타인의 서버가 아닌 당신의 SSD에 존재합니다. |
-| **Gradio Chat UI** | 한 번의 명령(`--chat`)으로 로컬 데모, 내부 검토 세션, 보안 내부 도구를 실행. |
+| **AI Trader Chat UI** | 단일 명령어(`--chat` 포트 `5119`)로 실행. 보안 KMS 자격 증명 금고가 통합되어 Hyperliquid의 자산, 포지션 및 거래 내역을 실시간 모니터링. |
 | **서비스 매니저** | `service.sh`이 데몬화, 헬스 체크, 로그 로테이션, 포트 관리, 무중단 재시작을 처리. |
 | **API 키 인증** | 환경 변수를 통해 키 로테이션. 프록시 없이도 엔터프라이즈급 접근 제어. |
 
@@ -256,7 +256,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 ### API 호출(로컬 전용)
 
 ```bash
-curl http://localhost:8080/v1/chat/completions \
+curl http://localhost:5118/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
@@ -280,7 +280,7 @@ xmlx_vlm.ai-trader
 xmlx_vlm.ai-trader --prompt "BTC 동향 분석"
 ```
 
-AI Trader는 Hyperliquid 데이터 소스를 통합하여 5m/15m/1h 멀티 타임프레임 분석, L2 오더북 깊이, 거래 흐름, 자금 조달 비율 및 미결제 약정을 지원하며, 모두 로컬에서 완료됩니다.
+AI Trader는 Hyperliquid 데이터 소스를 통합하여 5m/15m/1h 멀티 타임프레임 분석, L2 오더북 깊이, 거래 흐름, 자금 조달 비율 및 미결제 약정을 지원합니다. 로컬 의사결정의 최적화를 위해 **단일 요청 내 대항적 토론(Adversarial Debate)**을 통해 편향을 제거하고, 포지션 청산 시 **자동 사후 복기(Reflection)** 결과를 로컬 SQLite에 저장하여 자가 학습 폐루프를 구축합니다. 모두 로컬에서 완료됩니다.
 
 ---
 
@@ -296,7 +296,7 @@ XMLX-VLM은 **코딩 에이전트와 AI 어시스턴트를 위한 로컬 백엔�
 #!/bin/sh
 unset ANTHROPIC_API_KEY
 
-export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
+export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:5118}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
 export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
@@ -333,7 +333,7 @@ VS Code 설정 또는 `~/.continue/config.json`에서:
       "title": "XMLX-VLM Local",
       "provider": "openai",
       "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
-      "apiBase": "http://localhost:8080/v1",
+      "apiBase": "http://localhost:5118/v1",
       "apiKey": "x123456"
     }
   ]
@@ -343,7 +343,7 @@ VS Code 설정 또는 `~/.continue/config.json`에서:
 ### Aider(OpenAI 호환)
 
 ```bash
-export OPENAI_API_BASE=http://localhost:8080/v1
+export OPENAI_API_BASE=http://localhost:5118/v1
 export OPENAI_API_KEY=x123456
 aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
@@ -351,7 +351,7 @@ aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ### Cursor(OpenAI 호환)
 
 Cursor 설정 → 모델 → 모델 추가:
-- **Base URL**: `http://localhost:8080/v1`
+- **Base URL**: `http://localhost:5118/v1`
 - **API Key**: `x123456`
 - **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
@@ -364,7 +364,7 @@ Pi는 XMLX-VLM과 잘 어울리는 로컬 우선 코딩 에이전트입니다. `
   "providers": {
     "xmlx-local": {
       "name": "XMLX-VLM (local)",
-      "baseUrl": "http://localhost:8080/v1",
+      "baseUrl": "http://localhost:5118/v1",
       "api": "openai-completions",
       "apiKey": "x123456",
       "compat": {

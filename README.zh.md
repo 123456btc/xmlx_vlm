@@ -73,12 +73,12 @@ AFRE 研究**市场因子的谱系**：它们为什么被发明、如何传播�
 |------|-----------|
 | **本地文档智能** | 直接把 PDF、扫描件、截图、图文混排报告喂给模型。没有 OCR SaaS。没有云端视觉 API。你的文档永不离开 localhost。 |
 | **推理后的结构化输出** | 开启 `thinking` 模式进行深度推理，然后对最终输出强制执行 JSON-Schema 约束。审计级报告、因子定义、临床摘要的完美选择。 |
-| **双协议 API** | 一个 Server 同时说 OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两种协议。作为 Cursor、Claude Code、LangChain、PydanticAI 的后端——全部流量留在 `localhost:8080`。 |
+| **双协议 API** | 一个 Server 同时说 OpenAI（`/v1/chat/completions`）和 Anthropic（`/v1/messages`）两种协议。作为 Cursor、Claude Code、LangChain、PydanticAI 的后端——全部流量留在 `localhost:5118`。 |
 | **本地工具调用 & MCP** | 通过 MCP 连接本地数据库、回测器、电子病历系统、案件管理工具、文档流水线。模型调用你的工具；你的数据永不离开机器。 |
 | **Embedding & Rerank 用于私有知识** | 索引内部文档、研究笔记、案件卷宗、患者病史。在你的专有知识库上做语义搜索——零云端暴露。 |
-| **AI Trader（本地量化助手）** | 与本地 AI 交易助手对话，基于 Hyperliquid L1/L2/衍生品数据与 5m/15m/1h 多周期分析行情，本地渲染图表并模拟交易。 |
+| **AI Trader（本地量化助手）** | 与本地 AI 交易助手对话。通过 Hyperliquid WebSocket 常驻行情服务自动监控 24h 成交额前 30 名永续合约，实时计算技术指标并推送阈值警报，本地渲染图表并模拟交易。 |
 | **SSD 持久化前缀缓存** | 重复分析同一文档或系统 prompt 时毫秒级 warm-start，即使 server 重启后也是如此。缓存活在你的 SSD 上，不是别人的服务器。 |
-| **Gradio Chat UI** | 一条命令启动（`--chat`），用于本地 demo、内部评审会议、安全内部工具。 |
+| **AI Trader Chat UI** | 一条命令启动（`--chat`，端口 `5119`），集成安全 KMS 凭证保险箱，可实时监控 Hyperliquid 资产、持仓与成交历史。 |
 | **Service Manager** | `service.sh` 一键守护进程化，含健康检查、日志轮转、端口管理、零停机重启。 |
 | **API Key 认证** | 通过环境变量轮换密钥。无需代理即可实现企业级访问控制。 |
 
@@ -258,7 +258,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 ### 调用 API（仅限本地）
 
 ```bash
-curl http://localhost:8080/v1/chat/completions \
+curl http://localhost:5118/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
@@ -282,7 +282,7 @@ xmlx_vlm.ai-trader
 xmlx_vlm.ai-trader --prompt "分析 BTC 走势"
 ```
 
-AI Trader 统一使用 Hyperliquid 数据源，支持 5m/15m/1h 多周期分析、L2 订单簿深度、逐笔成交流、资金费率与持仓量查询，全部在本地完成。
+AI Trader 通过 Hyperliquid WebSocket 常驻行情服务获取数据：自动订阅 24h 成交额前 30 名永续合约，维护内存状态机，实时计算技术指标，并在价格突破、OI 异动、大单集群、Funding 反转、盘口失衡、波动率扩张时发出警报。为了使本地决策最优化，AI Trader 新增了**单请求多空对抗辩论机制**以防范单边倾向，并在平仓时自动启动**异步复盘反思任务**将经验写入本地 SQLite，自动闭环学习并指导后续决策。工具优先读取本地快照，缺失时回退到 REST 轮询。
 
 ---
 
@@ -298,7 +298,7 @@ XMLX-VLM 专为**编程 Agent 和 AI 助手的本地后端**而设计。由于 A
 #!/bin/sh
 unset ANTHROPIC_API_KEY
 
-export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
+export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:5118}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
 export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
@@ -335,7 +335,7 @@ APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start
       "title": "XMLX-VLM Local",
       "provider": "openai",
       "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
-      "apiBase": "http://localhost:8080/v1",
+      "apiBase": "http://localhost:5118/v1",
       "apiKey": "x123456"
     }
   ]
@@ -345,7 +345,7 @@ APC_ENABLED=1 APC_DISK_PATH=/tmp/xmlx-apc ./service.sh start
 ### Aider（OpenAI 兼容）
 
 ```bash
-export OPENAI_API_BASE=http://localhost:8080/v1
+export OPENAI_API_BASE=http://localhost:5118/v1
 export OPENAI_API_KEY=x123456
 aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
@@ -353,7 +353,7 @@ aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ### Cursor（OpenAI 兼容）
 
 在 Cursor 设置 → Models → Add Model：
-- **Base URL**: `http://localhost:8080/v1`
+- **Base URL**: `http://localhost:5118/v1`
 - **API Key**: `x123456`
 - **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
@@ -366,7 +366,7 @@ Pi 是一款本地优先的编程 Agent，与 XMLX-VLM 配合良好。在 `~/.pi
   "providers": {
     "xmlx-local": {
       "name": "XMLX-VLM (local)",
-      "baseUrl": "http://localhost:8080/v1",
+      "baseUrl": "http://localhost:5118/v1",
       "api": "openai-completions",
       "apiKey": "x123456",
       "compat": {

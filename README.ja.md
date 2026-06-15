@@ -73,12 +73,12 @@ AFREはXMLX-VLMの定量的ファイナンスにおける代表的実装を体�
 |------------|-------------|
 | **ローカル文書インテリジェンス** | PDF、スキャン文書、スクリーンショット、画像重視のレポートを直接モデルに投入。OCR SaaS不要。クラウドVision API不要。文書はlocalhostから一切外出しない。 |
 | **推論付き構造化出力** | `thinking`モードを有効化して深い推論を行い、その後最終出力にJSON Schema制約を適用。監査対応レポート、ファクター定義、臨床サマリーに最適。 |
-| **デュアルプロトコルAPI** | 1つのサーバーがOpenAI（`/v1/chat/completions`）とAnthropic（`/v1/messages`）の両方のプロトコルを話す。Cursor、Claude Code、LangChain、PydanticAIのバックエンドとして差し込み可能——すべてのトラフィックは`localhost:8080`上に留まる。 |
+| **デュアルプロトコルAPI** | 1つのサーバーがOpenAI（`/v1/chat/completions`）とAnthropic（`/v1/messages`）の両方のプロトコルを話す。Cursor、Claude Code、LangChain、PydanticAIのバックエンドとして差し込み可能——すべてのトラフィックは`localhost:5118`上に留まる。 |
 | **ローカルツール呼び出し＆MCP** | MCP経由で、ローカルデータベース、バックテスター、EHRシステム、案件管理ツール、文書パイプラインに接続。モデルがあなたのツールを呼び出す。あなたのデータはマシンから出ない。 |
 | **プライベート知識用Embedding＆Rerank** | 内部文書、研究ノート、案件ファイル、患者履歴をインデックス化。独自の知識ベースに対するセマンティック検索——クラウド露出ゼロ。 |
 | **AI Trader（ローカル定量アシスタント）** | HyperliquidのL1/L2/派生商品データと5m/15m/1hのマルチタイムフレーム分析に基づき、ローカルでチャートを描画しシミュレーション取引ができるAIアシスタントと対話。 |
 | **SSD永続化プリフィックスキャッシュ** | 同一文書やシステムプロンプトの繰り返し分析が、サーバー再起動後でもミリ秒でウォームスタート。キャッシュは誰かのサーバーではなく、あなたのSSD上に存在する。 |
-| **Gradio Chat UI** | 1コマンド（`--chat`）でローカルデモ、内部レビューセッション、セキュアな内部ツールを起動。 |
+| **AI Trader Chat UI** | 1つのコマンド（`--chat`、ポート `5119`）で起動。セキュアな KMS 認証情報の保管庫を統合し、Hyperliquid の資産、ポジション、取引履歴をリアルタイムで監視。 |
 | **サービスマネージャー** | `service.sh`がデーモン化、ヘルスチェック、ログローテーション、ポート管理、ゼロダウンタイム再起動を処理する。 |
 | **API Key認証** | 環境変数経由でキーをローテーション。プロキシなしでエンタープライズグレードのアクセス制御。 |
 
@@ -256,7 +256,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 ### APIの呼び出し（ローカルのみ）
 
 ```bash
-curl http://localhost:8080/v1/chat/completions \
+curl http://localhost:5118/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
@@ -280,7 +280,7 @@ xmlx_vlm.ai-trader
 xmlx_vlm.ai-trader --prompt "BTCの動向を分析して"
 ```
 
-AI TraderはHyperliquidのデータソースを統一し、5m/15m/1hのマルチタイムフレーム分析、L2 オーダーブック深度、取引フロー、資金調達率、未決済建玉をサポート。すべてローカルで完結する。
+AI TraderはHyperliquidのデータソースを統一し、5m/15m/1hのマルチタイムフレーム分析、L2 オーダーブック深度、取引フロー、資金調達率、未決済建玉をサポート。ローカルの意思決定を最適化するため、**単一リクエストでの Bull/Bear 対抗討論（Adversarial Debate）**によりバイアスを排除し、ポジションクローズ時の**自動ポストトレード反省（Reflection）**をローカル SQLite に保存して自律的な学習閉環を実現します。すべてローカルで完結する。
 
 ---
 
@@ -296,7 +296,7 @@ XMLX-VLMは、**コーディングエージェントやAIアシスタントの�
 #!/bin/sh
 unset ANTHROPIC_API_KEY
 
-export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
+export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:5118}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
 export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
@@ -333,7 +333,7 @@ VS Code設定または`~/.continue/config.json`で：
       "title": "XMLX-VLM Local",
       "provider": "openai",
       "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
-      "apiBase": "http://localhost:8080/v1",
+      "apiBase": "http://localhost:5118/v1",
       "apiKey": "x123456"
     }
   ]
@@ -343,7 +343,7 @@ VS Code設定または`~/.continue/config.json`で：
 ### Aider（OpenAI互換）
 
 ```bash
-export OPENAI_API_BASE=http://localhost:8080/v1
+export OPENAI_API_BASE=http://localhost:5118/v1
 export OPENAI_API_KEY=x123456
 aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
@@ -351,7 +351,7 @@ aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ### Cursor（OpenAI互換）
 
 Cursor Settings → Models → Add Modelで：
-- **Base URL**: `http://localhost:8080/v1`
+- **Base URL**: `http://localhost:5118/v1`
 - **API Key**: `x123456`
 - **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
@@ -364,7 +364,7 @@ Piは、XMLX-VLMと相性の良いローカルファーストのコーディン�
   "providers": {
     "xmlx-local": {
       "name": "XMLX-VLM (local)",
-      "baseUrl": "http://localhost:8080/v1",
+      "baseUrl": "http://localhost:5118/v1",
       "api": "openai-completions",
       "apiKey": "x123456",
       "compat": {

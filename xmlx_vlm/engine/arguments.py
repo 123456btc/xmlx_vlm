@@ -54,6 +54,7 @@ class GenerationArguments:
     # by another. None = no salt = single-tenant behaviour.
     tenant_id: Optional[str] = None
     enable_tool_logits_bias: bool = DEFAULT_ENABLE_TOOL_LOGITS_BIAS
+    session_id: Optional[str] = None
 
     def to_generate_kwargs(self) -> dict:
         """Convert to kwargs dict for generate()/stream_generate()."""
@@ -290,6 +291,7 @@ def _build_gen_args(
         thinking_end_token=getattr(request, "thinking_end_token", None),
         tenant_id=tenant_id,
         enable_tool_logits_bias=enable_tool_logits_bias,
+        session_id=getattr(request, "session_id", None),
     )
     if processor is not None:
         args.logits_processors = _build_structured_logits_processors(request, processor, args)

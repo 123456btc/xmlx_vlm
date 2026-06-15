@@ -214,7 +214,7 @@ def check_service() -> Tuple[bool, List[str]]:
     return ok, lines
 
 
-def run_diagnostics(port: int = 8080) -> bool:
+def run_diagnostics(port: int = 5118) -> bool:
     """Run all diagnostic checks and print a report."""
     print("=" * 60)
     print(" XMLX-VLM Doctor")
@@ -251,8 +251,8 @@ def main() -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("XMLX_VLM_PORT", "8080")),
-        help="Server port to check (default: 8080 or XMLX_VLM_PORT env)",
+        default=int(os.environ.get("XMLX_VLM_PORT", "5118")),
+        help="Server port to check (default: 5118 or XMLX_VLM_PORT env)",
     )
     args = parser.parse_args()
     ok = run_diagnostics(port=args.port)

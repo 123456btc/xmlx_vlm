@@ -66,7 +66,7 @@ class MLXVisionChat:
         temperature: float = 0.7,
         max_tokens: int = 1000,
         verbose: bool = False,
-        server_url: Optional[str] = "http://localhost:8080",
+        server_url: Optional[str] = "http://localhost:5118",
         api_key: Optional[str] = None,
         local_only: bool = False,
         **kwargs,
@@ -512,7 +512,7 @@ def main():
         "--server-url",
         type=str,
         default=None,
-        help="URL of a running xmlx_vlm server (e.g. http://localhost:8080). "
+        help="URL of a running xmlx_vlm server (e.g. http://localhost:5118). "
         "If provided and reachable, chat.py will use the server's loaded "
         "model instead of loading one locally.",
     )

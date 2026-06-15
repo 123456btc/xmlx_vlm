@@ -60,6 +60,11 @@ from ..metrics import metrics
 logger = logging.getLogger("xmlx_vlm.routes.completions")
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+_COMPLETIONS_EXECUTOR = ThreadPoolExecutor(
+    max_workers=256,
+    thread_name_prefix="xmlx_vlm_completions",
+)
 import gc
 
 import mlx.core as mx
@@ -225,7 +230,8 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                     if get_store().response_generator is not None:
                         # generate() does blocking Queue.get — run off event loop
                         try:
-                            ctx, token_iter = await asyncio.to_thread(
+                            ctx, token_iter = await asyncio.get_running_loop().run_in_executor(
+                                _COMPLETIONS_EXECUTOR,
                                 get_store().response_generator.generate,
                                 formatted_prompt,
                                 images if images else None,
@@ -270,7 +276,9 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                         _last_sse_time = time.monotonic()
 
                         while True:
-                            token = await asyncio.to_thread(_next_token)
+                            token = await asyncio.get_running_loop().run_in_executor(
+                                _COMPLETIONS_EXECUTOR, _next_token
+                            )
                             if token is None:
                                 break
                             output_tokens += 1
@@ -529,7 +537,9 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                         return text, pt, gt, pm
 
                     full_text, prompt_tokens, output_tokens, peak_memory = (
-                        await asyncio.to_thread(_blocking_generate)
+                        await asyncio.get_running_loop().run_in_executor(
+                            _COMPLETIONS_EXECUTOR, _blocking_generate
+                        )
                     )
                 else:
                     gen_result = generate(

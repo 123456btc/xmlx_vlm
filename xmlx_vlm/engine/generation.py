@@ -168,6 +168,7 @@ class ResponseGenerator:
         self._idle_kv_release_timeout: Optional[float] = get_idle_kv_release_timeout()
         self._last_activity_time: float = time.time()
         self._idle_kv_released: bool = False
+        self.prompt_cache_states: dict = {}
         self._thread = Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -350,6 +351,11 @@ class ResponseGenerator:
                 self.apc_manager.clear()
             except Exception as exc:
                 logger.warning("Error clearing APC during idle release: %s", exc)
+
+        try:
+            self.prompt_cache_states.clear()
+        except Exception:
+            pass
 
         try:
             mx.clear_cache()
@@ -902,6 +908,15 @@ class ResponseGenerator:
                         if k not in ["input_ids", "pixel_values", "attention_mask"]
                     }
 
+                    # Look up or create PromptCacheState for this session
+                    prompt_cache_state = None
+                    session_id = getattr(args, "session_id", None)
+                    if session_id:
+                        from ..diffusion_generate import PromptCacheState
+                        if session_id not in self.prompt_cache_states:
+                            self.prompt_cache_states[session_id] = PromptCacheState()
+                        prompt_cache_state = self.prompt_cache_states[session_id]
+
                     detokenizer = make_streaming_detokenizer(self.processor)
                     rqueue.put(GenerationContext(uid=0, prompt_tokens=prompt_tokens))
 
@@ -918,6 +933,7 @@ class ResponseGenerator:
                             "temperature": args.temperature,
                             **data_kwargs,
                         },
+                        prompt_cache_state=prompt_cache_state,
                     ):
                         text = response.text
                         if text:

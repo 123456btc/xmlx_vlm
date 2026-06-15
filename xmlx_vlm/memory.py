@@ -63,8 +63,16 @@ class MemoryStore:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+        except Exception:
+            pass
+        return conn
+
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS memories (
@@ -115,7 +123,7 @@ class MemoryStore:
             embedding_json = None
 
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT INTO memories (session_id, content, embedding, metadata, created_at)
@@ -160,7 +168,7 @@ class MemoryStore:
         # 2. Load candidate memories
         candidates: List[Tuple[int, str, List[float], str]] = []
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 if session_id:
                     rows = conn.execute(
                         "SELECT id, content, embedding FROM memories WHERE session_id = ? AND embedding IS NOT NULL",
@@ -219,7 +227,7 @@ class MemoryStore:
     def clear(self, session_id: Optional[str] = None) -> int:
         """Delete memories. Returns number of rows deleted."""
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 if session_id:
                     cur = conn.execute(
                         "DELETE FROM memories WHERE session_id = ?", (session_id,)
@@ -231,7 +239,7 @@ class MemoryStore:
 
     def stats(self) -> Dict[str, Any]:
         """Return store statistics."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             total = conn.execute(
                 "SELECT COUNT(*) FROM memories"
             ).fetchone()[0]

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "trend_follow_btc",
+    "name": "BTC Trend Follower",
+    "exchange": "paper",
+    "strategy_type": "trend",
+    "symbols": ["BTC/USDC"],
+    "scan_interval_seconds": 300,
+    "dry_run": true,
+    "live_enabled": false
+  },
+  {
+    "id": "trend_follow_eth",
+    "name": "ETH Trend Follower",
+    "exchange": "paper",
+    "strategy_type": "trend",
+    "symbols": ["ETH/USDC"],
+    "scan_interval_seconds": 300,
+    "dry_run": true,
+    "live_enabled": false
+  },
+  {
+    "id": "trend_follow_sol",
+    "name": "SOL Trend Follower",
+    "exchange": "paper",
+    "strategy_type": "trend",
+    "symbols": ["SOL/USDC"],
+    "scan_interval_seconds": 300,
+    "dry_run": true,
+    "live_enabled": false
+  },
+  {
+    "id": "trend_follow_doge",
+    "name": "DOGE Trend Follower",
+    "exchange": "paper",
+    "strategy_type": "trend",
+    "symbols": ["DOGE/USDC"],
+    "scan_interval_seconds": 300,
+    "dry_run": true,
+    "live_enabled": false
+  }
+]

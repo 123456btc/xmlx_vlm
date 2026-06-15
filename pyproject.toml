@@ -41,6 +41,7 @@ Issues = "https://github.com/Blaizzy/mlx-vlm/issues"
 "xmlx_vlm.computer_use.gui_voice" = "xmlx_vlm.computer_use.gui_agent_voice:main"
 "xmlx_vlm.computer_use.autonomous_voice" = "xmlx_vlm.computer_use.autonomous_gui_agent_voice:main"
 "xmlx_vlm.ai-trader" = "xmlx_vlm.ai_trader.cli:main"
+"xmlx_vlm.ai-trader-web" = "xmlx_vlm.ai_trader.web_server:main"
 "xmlx_vlm" = "xmlx_vlm.cli:main"
 
 [tool.setuptools.packages.find]

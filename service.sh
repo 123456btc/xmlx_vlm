@@ -8,8 +8,8 @@
 #
 # Configurable via environment variables (or edit defaults below):
 #   XMLX_VLM_MODEL       Default model to load
-#   XMLX_VLM_PORT        Server port (default: 8080)
-#   XMLX_VLM_CHAT_PORT   Chat UI port (default: 7860)
+#   XMLX_VLM_PORT        Server port (default: 5118)
+#   XMLX_VLM_CHAT_PORT   Chat UI port (default: 5119)
 #   XMLX_VLM_API_KEY     API key for auth (default: x123456)
 #   XMLX_VLM_ARGS        Extra args passed to server (e.g. --enable-thinking)
 #
@@ -28,8 +28,8 @@ PID_DIR="${SCRIPT_DIR}/.pids"
 LOG_DIR="${SCRIPT_DIR}/.logs"
 
 MODEL="${XMLX_VLM_MODEL:-mlx-community/diffusiongemma-26B-A4B-it-4bit}"
-PORT="${XMLX_VLM_PORT:-8080}"
-CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
+PORT="${XMLX_VLM_PORT:-5118}"
+CHAT_PORT="${XMLX_VLM_CHAT_PORT:-5119}"
 API_KEY="${XMLX_VLM_API_KEY:-x123456}"
 EXTRA_ARGS="${XMLX_VLM_ARGS:-}"
 
@@ -46,8 +46,11 @@ COMPUTER_MODE="${XMLX_VLM_COMPUTER_MODE:-autonomous}"
 
 SERVER_PID_FILE="${PID_DIR}/server.pid"
 CHAT_PID_FILE="${PID_DIR}/chat.pid"
+STRATEGY_PID_FILE="${PID_DIR}/strategies.pid"
 SERVER_LOG="${LOG_DIR}/server.log"
 CHAT_LOG="${LOG_DIR}/chat.log"
+STRATEGY_LOG="${LOG_DIR}/strategies.log"
+STRATEGY_CONFIG="${SCRIPT_DIR}/xmlx_vlm/ai_trader/strategies.json"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 ensure_dirs() {
@@ -197,7 +200,7 @@ cmd_start() {
             echo "  Port: ${CHAT_PORT}"
 
             local chat_args=(
-                -m xmlx_vlm.chat_server
+                -m xmlx_vlm.ai_trader.web_server
                 --server-url "http://localhost:${PORT}"
                 --port "$CHAT_PORT"
             )
@@ -210,13 +213,28 @@ cmd_start() {
             local chat_pid=$!
             echo "$chat_pid" > "$CHAT_PID_FILE"
 
-            # Wait a bit for Gradio to bind
+            # Wait a bit for Fastapi to bind
             sleep 3
             if ! curl -sf "http://localhost:${CHAT_PORT}" >/dev/null 2>&1; then
                 echo "WARNING: Chat UI may still be loading..."
             fi
             echo "Chat UI ready at http://localhost:${CHAT_PORT} (PID: ${chat_pid})"
         fi
+    fi
+
+    # ── Start AI Strategy Engine ──
+    if is_running "$STRATEGY_PID_FILE"; then
+        echo "AI Strategy Engine already running (PID: $(cat "$STRATEGY_PID_FILE"))"
+    else
+        echo "Starting AI Strategy Engine (Top-30 Watchlist Dynamic Mode)..."
+        # Start strategies CLI auto-start in the background
+        nohup "$VENV_PYTHON" -u -m xmlx_vlm.ai_trader.cli \
+            --server-url "http://localhost:${PORT}" \
+            --api-key "$API_KEY" \
+            --auto-start > "$STRATEGY_LOG" 2>&1 &
+        local strategy_pid=$!
+        echo "$strategy_pid" > "$STRATEGY_PID_FILE"
+        echo "AI Strategy Engine ready (PID: ${strategy_pid})"
     fi
 }
 
@@ -267,6 +285,18 @@ cmd_stop() {
         killed=true
     fi
 
+    # ── Stop AI Strategy Engine ──
+    if is_running "$STRATEGY_PID_FILE"; then
+        local pid
+        pid="$(cat "$STRATEGY_PID_FILE")"
+        echo "Stopping AI Strategy Engine (PID: ${pid})..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+        rm -f "$STRATEGY_PID_FILE"
+        killed=true
+    fi
+
     if [[ "$killed" == true ]]; then
         echo "Stopped."
     else
@@ -312,16 +342,25 @@ cmd_status() {
         fi
     fi
 
+    local strategy_status="stopped"
+    local strategy_pid=""
+    if is_running "$STRATEGY_PID_FILE"; then
+        strategy_pid="$(cat "$STRATEGY_PID_FILE")"
+        strategy_status="running"
+    fi
+
     echo "╔══════════════════════════════════════════╗"
     echo "║        XMLX VLM Service Status           ║"
     echo "╠══════════════════════════════════════════╣"
-    printf "║  Server: %-31s ║\n" "${server_status}"
-    [[ -n "$server_pid" ]] && printf "║  PID:    %-31s ║\n" "${server_pid}"
-    [[ -n "$server_model" ]] && printf "║  Model:  %-31s ║\n" "${server_model}"
-    printf "║  Port:   %-31s ║\n" "${PORT}"
-    printf "║  Chat:   %-31s ║\n" "${chat_status}"
-    [[ -n "$chat_pid" ]] && printf "║  PID:    %-31s ║\n" "${chat_pid}"
-    printf "║  Port:   %-31s ║\n" "${CHAT_PORT}"
+    printf "║  Server:   %-31s ║\n" "${server_status}"
+    [[ -n "$server_pid" ]] && printf "║  PID:      %-31s ║\n" "${server_pid}"
+    [[ -n "$server_model" ]] && printf "║  Model:    %-31s ║\n" "${server_model}"
+    printf "║  Port:     %-31s ║\n" "${PORT}"
+    printf "║  Chat:     %-31s ║\n" "${chat_status}"
+    [[ -n "$chat_pid" ]] && printf "║  PID:      %-31s ║\n" "${chat_pid}"
+    printf "║  Port:     %-31s ║\n" "${CHAT_PORT}"
+    printf "║  Strategy: %-29s ║\n" "${strategy_status}"
+    [[ -n "$strategy_pid" ]] && printf "║  PID:      %-29s ║\n" "${strategy_pid}"
     echo "╚══════════════════════════════════════════╝"
 }
 
@@ -329,6 +368,8 @@ cmd_logs() {
     local target="${1:-server}"
     if [[ "$target" == "chat" ]]; then
         tail -f "$CHAT_LOG"
+    elif [[ "$target" == "strategy" ]]; then
+        tail -f "$STRATEGY_LOG"
     else
         tail -f "$SERVER_LOG"
     fi

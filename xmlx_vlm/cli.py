@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_p = subparsers.add_parser("serve", help="Start the OpenAI-compatible server")
     serve_p.add_argument("--model", type=str, default=None, help="Default model to load")
     serve_p.add_argument("--host", type=str, default="0.0.0.0", help="Server host")
-    serve_p.add_argument("--port", type=int, default=8080, help="Server port")
+    serve_p.add_argument("--port", type=int, default=5118, help="Server port")
     serve_p.add_argument("--trust-remote-code", action="store_true", help="Trust remote code")
     serve_p.add_argument("--mcp-config", type=str, default=None, help="Path to MCP config file for external MCP servers")
 
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # chat_server
     chat_server_p = subparsers.add_parser("chat_server", help="Launch Gradio chat UI (connect to server)")
-    chat_server_p.add_argument("--server-url", type=str, default="http://localhost:8080", help="Server URL")
+    chat_server_p.add_argument("--server-url", type=str, default="http://localhost:5118", help="Server URL")
     chat_server_p.add_argument("--api-key", type=str, default=None, help="API key")
     chat_server_p.add_argument("--model", type=str, default=None, help="Model name")
     chat_server_p.add_argument("--port", type=int, default=7860, help="Gradio port")
@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
                                help="Install into ~/.codex/config.toml (default)")
     mcp_install_p.add_argument("--project", action="store_true",
                                help="Install into ./.codex/config.toml")
-    mcp_install_p.add_argument("--base-url", type=str, default="http://127.0.0.1:8080/v1",
+    mcp_install_p.add_argument("--base-url", type=str, default="http://127.0.0.1:5118/v1",
                                help="Server base URL")
     mcp_install_p.add_argument("--api-key", type=str, default="x123456",
                                help="API key for the server")

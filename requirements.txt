@@ -23,7 +23,7 @@ protobuf
 
 # ai_trader dependencies
 requests  # 公开交易所 REST API
-# ccxt  # 可选：更完整的交易所接入（若安装则优先使用）
+websockets>=16.0  # Hyperliquid WebSocket 实时行情
 
 # computer_use dependencies
 pyautogui

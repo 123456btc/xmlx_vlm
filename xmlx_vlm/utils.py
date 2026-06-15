@@ -168,6 +168,8 @@ def get_model_path(
     """
     model_path = Path(path_or_hf_repo)
     if not model_path.exists():
+        if revision is None:
+            revision = "main"
         model_path = Path(
             snapshot_download(
                 repo_id=path_or_hf_repo,

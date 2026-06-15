@@ -73,12 +73,12 @@ While AFRE represents XMLX-VLM's flagship implementation in quantitative finance
 |------------|-------------|
 | **Local Document Intelligence** | Feed PDFs, scanned documents, screenshots, and image-heavy reports directly into the model. No OCR SaaS. No cloud vision API. Your documents never leave localhost. |
 | **Structured Output with Reasoning** | Enable `thinking` mode for deep reasoning, then enforce JSON-Schema constraints on the final output. Perfect for audit-ready reports, factor definitions, and clinical summaries. |
-| **Dual-Protocol API** | One server speaks both OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) protocols. Drop in as the backend for Cursor, Claude Code, LangChain, PydanticAI — all traffic stays on `localhost:8080`. |
+| **Dual-Protocol API** | One server speaks both OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) protocols. Drop in as the backend for Cursor, Claude Code, LangChain, PydanticAI — all traffic stays on `localhost:5118`. |
 | **Local Tool Calling & MCP** | Connect to local databases, backtesters, EHR systems, case-management tools, and document pipelines via MCP. The model calls your tools; your data never leaves the machine. |
 | **Embedding & Rerank for Private Knowledge** | Index internal documents, research notes, case files, and patient histories. Semantic search over your proprietary knowledge base — with zero cloud exposure. |
-| **AI Trader (Local Quant Assistant)** | Chat with a local AI trading assistant that analyzes crypto through Hyperliquid L1/L2/derivatives data across 5m/15m/1h timeframes, renders charts, and simulates trades — all on your machine. |
+| **AI Trader (Local Quant Assistant)** | Chat with a local AI trading assistant connected to Hyperliquid via a persistent WebSocket feed. It auto-watches the top 30 perpetuals by 24h volume, computes real-time indicators, emits threshold-based alerts, renders charts, and simulates trades — all on your machine. |
 | **SSD-Persistent Prefix Cache** | Repeated analysis of the same document or system prompt warm-starts in milliseconds, even after server restart. The cache lives on your SSD, not someone else's server. |
-| **Gradio Chat UI** | One-command launch (`--chat`) for local demos, internal review sessions, and secure internal tooling. |
+| **AI Trader Chat UI** | One-command launch (`--chat` on port `5119`) with secure KMS credentials vault, real-time monitoring of Hyperliquid assets, positions, and trade history. |
 | **Service Manager** | `service.sh` handles daemonization, health checks, log rotation, port management, and zero-downtime restarts. |
 | **API Key Auth** | Rotate keys via environment variables. Enterprise-grade access control without a proxy. |
 
@@ -256,7 +256,7 @@ XMLX_VLM_DRAFT_MODEL="" XMLX_VLM_DRAFT_KIND="" ./service.sh start
 ### Call the API (Local Only)
 
 ```bash
-curl http://localhost:8080/v1/chat/completions \
+curl http://localhost:5118/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
@@ -280,7 +280,7 @@ xmlx_vlm.ai-trader
 xmlx_vlm.ai-trader --prompt "分析 BTC 走势"
 ```
 
-AI Trader uses Hyperliquid market data across 5m/15m/1h timeframes, L2 order book depth, trade flow, funding, and open interest — all locally.
+AI Trader connects to Hyperliquid through a persistent WebSocket market-data service. It auto-subscribes to the top 30 perpetuals by 24h volume, maintains an in-memory state machine, computes real-time indicators, and emits threshold-based alerts. To optimize local decisions, AI Trader integrates a **single-request Bull/Bear adversarial debate mechanism** to prevent unilateral bias, and automatically starts an **asynchronous post-trade reflection task** upon position closure to save trade insights into local SQLite, enabling closed-loop adaptive learning. Tools read the local snapshot first and fall back to REST when needed.
 
 ---
 
@@ -296,7 +296,7 @@ Create `~/.local/bin/claude-xmlx`:
 #!/bin/sh
 unset ANTHROPIC_API_KEY
 
-export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:8080}"
+export ANTHROPIC_BASE_URL="${XMLX_ANTHROPIC_BASE_URL:-http://127.0.0.1:5118}"
 export ANTHROPIC_AUTH_TOKEN="${XMLX_API_KEY:-x123456}"
 export ANTHROPIC_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
 
@@ -333,7 +333,7 @@ In your VS Code settings or `~/.continue/config.json`:
       "title": "XMLX-VLM Local",
       "provider": "openai",
       "model": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
-      "apiBase": "http://localhost:8080/v1",
+      "apiBase": "http://localhost:5118/v1",
       "apiKey": "x123456"
     }
   ]
@@ -343,7 +343,7 @@ In your VS Code settings or `~/.continue/config.json`:
 ### Aider (OpenAI-compatible)
 
 ```bash
-export OPENAI_API_BASE=http://localhost:8080/v1
+export OPENAI_API_BASE=http://localhost:5118/v1
 export OPENAI_API_KEY=x123456
 aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ```
@@ -351,7 +351,7 @@ aider --model openai/mlx-community/diffusiongemma-26B-A4B-it-4bit
 ### Cursor (OpenAI-compatible)
 
 In Cursor Settings → Models → Add Model:
-- **Base URL**: `http://localhost:8080/v1`
+- **Base URL**: `http://localhost:5118/v1`
 - **API Key**: `x123456`
 - **Model**: `mlx-community/diffusiongemma-26B-A4B-it-4bit`
 
@@ -364,7 +364,7 @@ Pi is a local-first coding agent that pairs well with XMLX-VLM. Add the provider
   "providers": {
     "xmlx-local": {
       "name": "XMLX-VLM (local)",
-      "baseUrl": "http://localhost:8080/v1",
+      "baseUrl": "http://localhost:5118/v1",
       "api": "openai-completions",
       "apiKey": "x123456",
       "compat": {

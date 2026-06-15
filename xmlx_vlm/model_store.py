@@ -118,6 +118,9 @@ class ModelStore:
         - Calls ``unload()`` first if a *different* model is cached.
         - Creates a new ``ResponseGenerator`` and ``APCManager`` on load.
         """
+        if model_path == "default" and self.cache:
+            model_path = self.cache.get("model_path", model_path)
+
         if adapter_path is _INHERIT_ADAPTER:
             cached_key = self.cache.get("cache_key")
             if cached_key and cached_key[0] == model_path:

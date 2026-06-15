@@ -223,8 +223,8 @@ info "Setting default environment variables..."
 
 export XMLX_VLM_API_KEY="${XMLX_VLM_API_KEY:-x123456}"
 export XMLX_VLM_MODEL="${XMLX_VLM_MODEL:-mlx-community/diffusiongemma-26B-A4B-it-4bit}"
-export XMLX_VLM_PORT="${XMLX_VLM_PORT:-8080}"
-export XMLX_VLM_CHAT_PORT="${XMLX_VLM_CHAT_PORT:-7860}"
+export XMLX_VLM_PORT="${XMLX_VLM_PORT:-5118}"
+export XMLX_VLM_CHAT_PORT="${XMLX_VLM_CHAT_PORT:-5119}"
 
 # Persist to shell profile for future sessions
 SHELL_PROFILE=""
@@ -241,8 +241,8 @@ if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
 # XMLX-VLM defaults
 export XMLX_VLM_API_KEY="x123456"
 export XMLX_VLM_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
-export XMLX_VLM_PORT="8080"
-export XMLX_VLM_CHAT_PORT="7860"
+export XMLX_VLM_PORT="5118"
+export XMLX_VLM_CHAT_PORT="5119"
 ENVEOF
         ok "Environment variables saved to $SHELL_PROFILE"
     fi

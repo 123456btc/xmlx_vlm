@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trader Quant Terminal</title>
+    <!-- Modern typography from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- TOP APP HEADER -->
+        <header class="app-header">
+            <div class="header-logo">
+                <i class="fa-solid fa-trident logo-icon"></i>
+                <span class="brand-text">AI TRADER</span>
+                <span class="terminal-badge">QUANT TERMINAL ☤</span>
+            </div>
+            <div class="server-status-strip">
+                <div class="status-item">
+                    <span class="status-label">Model:</span>
+                    <span id="header-model-name" class="status-val font-mono">Loading...</span>
+                </div>
+                <span id="header-trading-mode" style="display: none;"></span>
+                <div class="status-divider"></div>
+                <div class="status-item">
+                    <span class="status-label">API Server:</span>
+                    <span id="server-connection-dot" class="connection-dot offline"></span>
+                    <span id="server-connection-status" class="status-val">Offline</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT GRID -->
+        <div class="main-layout">
+            
+            <!-- LEFT PANEL: SESSIONS & SETTINGS -->
+            <aside class="panel left-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-comments"></i> Sessions</h2>
+                    <button id="btn-new-session" class="btn btn-sm btn-primary" title="New Session">
+                        <i class="fa-solid fa-plus"></i> New
+                    </button>
+                </div>
+                <div class="panel-content scrollable">
+                    <div id="sessions-list" class="list-container">
+                        <!-- Sessions will be loaded here dynamically -->
+                        <div class="loading-placeholder"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</div>
+                    </div>
+                </div>
+                <div class="panel-footer panel-config-info">
+                    <div class="config-row">
+                        <span>Risk Profile:</span>
+                        <span id="config-risk" class="font-mono text-warning">-</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CENTER PANEL: ACTIVE CHAT / ENCLAVE / EXCHANGE -->
+            <main class="panel center-panel chat-container">
+                <!-- TOP TAB NAVIGATION -->
+                <div class="view-tabs">
+                    <button class="tab-btn active" data-tab="chat-view"><i class="fa-solid fa-comments"></i> AI Assistant</button>
+                    <button class="tab-btn" data-tab="market-view"><i class="fa-solid fa-chart-line"></i> Markets</button>
+                    <button class="tab-btn" data-tab="kms-view"><i class="fa-solid fa-key"></i> API Keys & Wallet</button>
+                    <button class="tab-btn" data-tab="exchange-view"><i class="fa-solid fa-wallet"></i> Exchange Wallet & Assets</button>
+                    <button class="tab-btn" data-tab="strategy-view"><i class="fa-solid fa-brain"></i> Strategy Audits</button>
+                </div>
+                
+                <!-- CHAT VIEW CONTAINER -->
+                <div id="chat-view" class="view-container active-view">
+                    <div class="chat-header">
+                        <div class="chat-title-group">
+                            <h1 id="active-session-title">Select a Session</h1>
+                            <p id="active-session-meta" class="chat-subtitle">Start analyzing market data or placing trades</p>
+                        </div>
+                        <button id="btn-clear-chat" class="btn btn-sm btn-secondary" title="Clear History">
+                            <i class="fa-solid fa-trash-can"></i> Clear
+                        </button>
+                    </div>
+
+                    <div id="chat-timeline" class="chat-timeline scrollable">
+                        <!-- Messages render here -->
+                        <div class="empty-state">
+                            <i class="fa-solid fa-arrow-left pulse-icon"></i>
+                            <h3>Select or create a chat session on the left to begin trading.</h3>
+                            <p>You can ask things like:</p>
+                            <ul>
+                                <li>"BTC 现在什么行情？"</li>
+                                <li>"画一张 ETH 15分钟 K线图"</li>
+                                <li>"查看当前持仓情况"</li>
+                                <li>"模拟买入 0.05 BTC"</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- INPUT AREA -->
+                    <div class="chat-input-area">
+                        <div id="typing-indicator" class="typing-indicator hidden">
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                            <span id="typing-status-text">AI is thinking...</span>
+                        </div>
+                        <!-- Staged Attachments Preview -->
+                        <div id="staged-attachments" class="staged-attachments hidden"></div>
+                        <div class="input-row">
+                            <input type="file" id="attachment-file-input" multiple accept="image/*,video/*,.txt,.csv,.log,.json,.py,.md" style="display:none">
+                            <button id="btn-attach-file" class="btn btn-icon btn-secondary" title="Attach file (image, video, text)" disabled>
+                                <i class="fa-solid fa-paperclip"></i>
+                            </button>
+                            <textarea id="chat-input" placeholder="Enter market query or order instructions (e.g. Buy 0.1 BTC)..." rows="1" disabled></textarea>
+                            <button id="btn-send-message" class="btn btn-icon btn-primary" disabled>
+                                <i class="fa-solid fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MARKET VIEW CONTAINER -->
+                <div id="market-view" class="view-container hidden-view">
+                    <div class="market-header">
+                        <div class="market-title-group">
+                            <h2><i class="fa-solid fa-chart-line text-accent"></i> Market Watchlist</h2>
+                            <p class="market-subtitle">Real-time perpetual prices, 24h changes, funding rates, and volume on Hyperliquid</p>
+                        </div>
+                        <div class="market-controls">
+                            <select id="watchlist-sort-select" class="watchlist-sort-select" title="Sort Watchlist">
+                                <option value="volume_24h">24h Vol</option>
+                                <option value="change_24h_pct">24h Change</option>
+                                <option value="price">Price</option>
+                                <option value="funding_rate">Funding</option>
+                            </select>
+                            <button id="btn-watchlist-rotation" class="btn-watchlist-rotation" title="Toggle Auto-Rotation">
+                                <i class="fa-solid fa-rotate"></i> Auto-Rotation
+                            </button>
+                        </div>
+                    </div>
+                    <div class="market-content scrollable">
+                        <div id="watchlist-container" class="watchlist-container scrollable">
+                            <!-- Real-time watchlist items render here -->
+                            <div class="loading-placeholder"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading prices...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KMS VIEW CONTAINER -->
+                <div id="kms-view" class="view-container hidden-view">
+                    <div class="kms-header">
+                        <h2><i class="fa-solid fa-key text-accent"></i> API Keys & Wallet</h2>
+                        <span class="hsm-badge offline" id="kms-hsm-badge" style="display: none;"><i class="fa-solid fa-circle"></i> HSM OFFLINE</span>
+                    </div>
+                    
+                    <div class="kms-content scrollable">
+                        <!-- Initialization View -->
+                        <div id="kms-init-section" class="kms-card kms-form-card hidden" style="display: none;">
+                            <h3><i class="fa-solid fa-key text-warning"></i> Initialize Secure Vault</h3>
+                            <p class="kms-hint">To begin securing your keys, please set up a master vault password. This password derives key-encryption keys using PBKDF2-HMAC-SHA256 and is never stored on disk.</p>
+                            <div class="form-group">
+                                <label for="kms-init-pwd">Vault Master Password</label>
+                                <input type="password" id="kms-init-pwd" placeholder="Enter at least 6 characters...">
+                            </div>
+                            <div class="form-group">
+                                <label for="kms-init-pwd-confirm">Confirm Password</label>
+                                <input type="password" id="kms-init-pwd-confirm" placeholder="Confirm your master password...">
+                            </div>
+                            <button id="btn-kms-init" class="btn btn-primary btn-block"><i class="fa-solid fa-circle-check"></i> Initialize Secure Enclave</button>
+                        </div>
+
+                        <!-- Lock / Unlock View -->
+                        <div id="kms-lock-section" class="kms-card kms-form-card" style="display: none;">
+                            <div class="kms-lock-banner">
+                                <i class="fa-solid fa-lock lock-icon text-danger" id="kms-lock-icon"></i>
+                                <h3 id="kms-lock-title">Vault is Locked</h3>
+                                <p id="kms-lock-desc">Enter your master password to decrypt exchange keys in secure memory.</p>
+                            </div>
+                            
+                            <!-- Input password to unlock -->
+                            <div id="kms-unlock-inputs">
+                                <div class="form-group">
+                                    <label for="kms-master-pwd">Vault Master Password</label>
+                                    <input type="password" id="kms-master-pwd" placeholder="Enter master password...">
+                                </div>
+                                <button id="btn-kms-unlock" class="btn btn-primary btn-block"><i class="fa-solid fa-unlock"></i> Unlock Secure Enclave</button>
+                            </div>
+                            
+                            <!-- Button to lock (hidden when locked) -->
+                            <div id="kms-lock-inputs" class="hidden">
+                                <button id="btn-kms-lock" class="btn btn-danger btn-block"><i class="fa-solid fa-lock"></i> Lock Enclave & Wipe Memory</button>
+                            </div>
+                        </div>
+
+                        <!-- HSM Metrics & active key (Shown when unlocked) -->
+                        <div id="kms-unlocked-section" class="hidden">
+                            <div class="kms-grid" style="display: none;">
+                                <div class="kms-card metric-card">
+                                    <span class="metric-label">Encryption Algorithm</span>
+                                    <span class="metric-value">HMAC-256-CTR</span>
+                                    <span class="metric-sub">FIPS 140-2 Compliant</span>
+                                </div>
+                                <div class="kms-card metric-card">
+                                    <span class="metric-label">Memory Status</span>
+                                    <span class="metric-value text-success">SANDBOX ISOLATED</span>
+                                    <span class="metric-sub">Zero-swapping buffer active</span>
+                                </div>
+                                <div class="kms-card metric-card">
+                                    <span class="metric-label">Active Key Signer</span>
+                                    <span class="metric-value font-mono text-accent" id="kms-active-signer-label">None</span>
+                                    <span class="metric-sub text-tertiary" id="kms-active-signer-sub">No key signing trade actions</span>
+                                </div>
+                            </div>
+
+                            <!-- Keys list -->
+                            <div class="kms-card">
+                                <h3><i class="fa-solid fa-list-check text-accent"></i> Credentials Manager</h3>
+                                <table class="kms-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Label</th>
+                                            <th>Wallet Address</th>
+                                            <th>Network</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="kms-keys-tbody">
+                                        <!-- Dynamically generated keys -->
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Add key form -->
+                            <div class="kms-card kms-form-card">
+                                <h3><i class="fa-solid fa-plus text-success"></i> Add Hyperliquid Key</h3>
+                                <div class="form-group">
+                                    <label for="kms-new-label">Label / Name</label>
+                                    <input type="text" id="kms-new-label" placeholder="e.g. Hyperliquid Live Account 1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="kms-new-address">Wallet Address</label>
+                                    <input type="text" id="kms-new-address" class="font-mono" placeholder="0x...">
+                                </div>
+                                <div class="form-group">
+                                    <label for="kms-new-key">Private Key (Local Signing)</label>
+                                    <input type="password" id="kms-new-key" class="font-mono" placeholder="0x... (64 hex characters)">
+                                </div>
+                                <div class="form-group-checkbox">
+                                    <input type="checkbox" id="kms-new-testnet">
+                                    <label for="kms-new-testnet">Use Hyperliquid Testnet (Recommended for safety)</label>
+                                </div>
+                                <div class="form-group" style="display: none;">
+                                    <label for="kms-reverify-pwd">Verify Master Password</label>
+                                    <input type="password" id="kms-reverify-pwd" placeholder="Enter vault password to authorize encryption..." value="system_default">
+                                </div>
+                                <button id="btn-kms-add-key" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save Credential</button>
+                            </div>
+                        </div>
+
+                        <!-- Audit Logs Section -->
+                        <div class="kms-card" style="display: none;">
+                            <h3><i class="fa-solid fa-user-shield text-warning"></i> Cryptographic Audit Logs</h3>
+                            <div class="kms-audit-container scrollable" id="kms-audit-logs">
+                                <!-- Dynamic audit logs -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- EXCHANGE VIEW CONTAINER -->
+                <div id="exchange-view" class="view-container hidden-view">
+                    <div class="exchange-header">
+                        <div class="exchange-title-group">
+                            <h2><i class="fa-solid fa-building-columns text-accent"></i> Exchange Wallet & Assets</h2>
+                            <p class="exchange-subtitle" id="exchange-active-account-label">No active wallet connected</p>
+                        </div>
+                        <div class="exchange-actions" style="display: flex; align-items: center; gap: 12px;">
+                            <div class="wallet-select-group" style="display: flex; align-items: center; gap: 8px;">
+                                <label for="exchange-wallet-select" style="font-size: 12px; color: var(--color-text-secondary); white-space: nowrap;"><i class="fa-solid fa-wallet"></i> View Wallet:</label>
+                                <select id="exchange-wallet-select" class="form-control font-mono" style="padding: 6px 12px; font-size: 12px; border-radius: 4px; background: var(--color-bg-darker); border: 1px solid var(--color-border); color: var(--color-text); width: 220px; cursor: pointer;">
+                                    <option value="">-- Active Wallet --</option>
+                                </select>
+                            </div>
+                            <button id="btn-refresh-exchange" class="btn btn-sm btn-secondary"><i class="fa-solid fa-rotate"></i> Sync Data</button>
+                        </div>
+                    </div>
+
+                    <div class="exchange-content scrollable">
+                        <!-- Overview Card -->
+                        <div class="exchange-card overview-card">
+                            <div class="overview-item">
+                                <span class="overview-label">Total Account Value</span>
+                                <span class="overview-val font-mono text-accent" id="ex-total-equity">$0.00</span>
+                            </div>
+                            <div class="overview-grid">
+                                <div class="overview-item">
+                                    <span class="overview-label">Available Margin</span>
+                                    <span class="overview-val font-mono text-success" id="ex-avail-margin">$0.00</span>
+                                </div>
+                                <div class="overview-item">
+                                    <span class="overview-label">Used Margin</span>
+                                    <span class="overview-val font-mono text-warning" id="ex-used-margin">$0.00</span>
+                                </div>
+                                <div class="overview-item">
+                                    <span class="overview-label">Margin Utilization</span>
+                                    <span class="overview-val font-mono text-danger" id="ex-margin-util">0%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Sub Tab Navigation -->
+                        <div class="exchange-tabs">
+                            <button class="ex-tab-btn active" data-ex-tab="ex-positions">Positions</button>
+                            <button class="ex-tab-btn" data-ex-tab="ex-spot">Spot Balance</button>
+                            <button class="ex-tab-btn" data-ex-tab="ex-orders">Open Orders</button>
+                            <button class="ex-tab-btn" data-ex-tab="ex-history">Trade History</button>
+                        </div>
+
+                        <!-- Sub Views -->
+                        <!-- 1. Positions -->
+                        <div id="ex-positions" class="ex-sub-view active-ex-view">
+                            <table class="kms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Asset</th>
+                                        <th>Side</th>
+                                        <th>Size</th>
+                                        <th>Entry Price</th>
+                                        <th>Mark Price</th>
+                                        <th>Liq Price</th>
+                                        <th>Unrealized PnL</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ex-positions-tbody">
+                                    <tr><td colspan="8" class="table-empty">No active positions</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 2. Spot Balance -->
+                        <div id="ex-spot" class="ex-sub-view hidden-ex-view">
+                            <table class="kms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Asset / Token</th>
+                                        <th>Total Balance</th>
+                                        <th>Available</th>
+                                        <th>Frozen / Hold</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ex-spot-tbody">
+                                    <tr><td colspan="4" class="table-empty">No spot balances</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 3. Open Orders -->
+                        <div id="ex-orders" class="ex-sub-view hidden-ex-view">
+                            <table class="kms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Size</th>
+                                        <th>Price</th>
+                                        <th>Type</th>
+                                        <th>Time</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ex-orders-tbody">
+                                    <tr><td colspan="7" class="table-empty">No open orders</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 4. Trade History -->
+                        <div id="ex-history" class="ex-sub-view hidden-ex-view">
+                            <table class="kms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Qty</th>
+                                        <th>Price</th>
+                                        <th>Fee Paid</th>
+                                        <th>Realized PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ex-history-tbody">
+                                    <tr><td colspan="7" class="table-empty">No trade history</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STRATEGY VIEW CONTAINER -->
+                <div id="strategy-view" class="view-container hidden-view">
+                    <div class="strategy-header">
+                        <div class="strategy-title-group">
+                            <h2><i class="fa-solid fa-brain text-accent"></i> Strategy Audits & Replays</h2>
+                            <p class="strategy-subtitle">Institutional grade decision log trace and reasoning replay</p>
+                        </div>
+                        <div class="strategy-actions">
+                            <button id="btn-refresh-strategy" class="btn btn-sm btn-secondary"><i class="fa-solid fa-rotate"></i> Refresh Audits</button>
+                        </div>
+                    </div>
+
+                    <div class="strategy-layout">
+                        <!-- Left sidebar: Audit log list (Timeline style) -->
+                        <div class="strategy-audit-sidebar">
+                            <div class="sidebar-search-bar">
+                                <label for="strategy-id-select" class="sidebar-label">Strategy ID:</label>
+                                <select id="strategy-id-select" class="form-control font-mono">
+                                    <option value="trend_follow_btc">trend_follow_btc (BTC/USDC)</option>
+                                    <option value="trend_follow_eth">trend_follow_eth (ETH/USDC)</option>
+                                    <option value="trend_follow_sol">trend_follow_sol (SOL/USDC)</option>
+                                    <option value="trend_follow_doge">trend_follow_doge (DOGE/USDC)</option>
+                                </select>
+                            </div>
+                            <div id="strategy-decisions-list" class="strategy-decisions-list scrollable">
+                                <!-- Timeline items will render here dynamically -->
+                                <div class="loading-placeholder"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading decisions...</div>
+                            </div>
+                            <div class="pagination-controls">
+                                <button id="btn-prev-strategy-page" class="btn btn-sm btn-secondary" disabled><i class="fa-solid fa-chevron-left"></i> Prev</button>
+                                <span id="strategy-page-num" class="font-mono">Page 1</span>
+                                <button id="btn-next-strategy-page" class="btn btn-sm btn-secondary" disabled>Next <i class="fa-solid fa-chevron-right"></i></button>
+                            </div>
+                        </div>
+
+                        <!-- Right main panel: Detailed Replay Console -->
+                        <div class="strategy-audit-detail scrollable">
+                            <div id="audit-empty-state" class="audit-empty-state">
+                                <i class="fa-solid fa-terminal pulse-icon"></i>
+                                <h3>Select a cycle audit from the left timeline to begin replay</h3>
+                                <p>This terminal replays AI reasoning (Chain-of-thought), risk telemetry, and raw execution payloads.</p>
+                            </div>
+                            
+                            <div id="audit-replay-content" class="audit-replay-content" style="display: none;">
+                                <!-- Replay Header Info Bar -->
+                                <div class="audit-replay-header">
+                                    <div class="meta-item">
+                                        <span class="meta-label">Cycle:</span>
+                                        <span id="audit-cycle" class="meta-val font-mono">-</span>
+                                    </div>
+                                    <div class="meta-item">
+                                        <span class="meta-label">Timestamp:</span>
+                                        <span id="audit-timestamp" class="meta-val font-mono">-</span>
+                                    </div>
+                                    <div class="meta-item">
+                                        <span class="meta-label">Latency:</span>
+                                        <span id="audit-latency" class="meta-val font-mono">-</span>
+                                    </div>
+                                    <div class="meta-item">
+                                        <span class="meta-label">Decision:</span>
+                                        <span id="audit-action-badge" class="status-badge">-</span>
+                                    </div>
+                                </div>
+
+                                <!-- Section 1: AI Reasoning & CoT Trace -->
+                                <div class="detail-section">
+                                    <div class="section-title"><i class="fa-solid fa-scroll"></i> AI Reasoning & COT Trace</div>
+                                    <div class="console-trace scrollable">
+                                        <div id="audit-cot-trace" class="markdown-body font-mono"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Section 2: Environment Input Prompt Snapshot -->
+                                <div class="detail-section">
+                                    <div class="section-title"><i class="fa-solid fa-database"></i> Pre-Trade Prompt Snapshots</div>
+                                    
+                                    <!-- User Prompt Drawer -->
+                                    <details class="prompt-drawer">
+                                        <summary><i class="fa-solid fa-code"></i> User Prompt Snapshot (Market Inputs)</summary>
+                                        <pre id="audit-user-prompt" class="font-mono"></pre>
+                                    </details>
+
+                                    <!-- System Prompt Drawer -->
+                                    <details class="prompt-drawer" style="margin-top: 8px;">
+                                        <summary><i class="fa-solid fa-gears"></i> System Prompt (Agent Persona & Rules)</summary>
+                                        <pre id="audit-system-prompt" class="font-mono"></pre>
+                                    </details>
+                                </div>
+
+                                <!-- Section 3: Executed Directive Payload -->
+                                <div class="detail-section">
+                                    <div class="section-title"><i class="fa-solid fa-terminal"></i> Execution Directive JSON</div>
+                                    <pre id="audit-directive-json" class="font-mono directive-code"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- RIGHT PANEL: MARKET WATCHLIST & OMS PORTFOLIO -->
+            <aside class="panel right-panel">
+                
+                <!-- PORTFOLIO SECTION -->
+                <div class="right-panel-section portfolio-section">
+                    <div class="panel-header section-header">
+                        <h2><i class="fa-solid fa-wallet"></i> OMS Account</h2>
+                    </div>
+                    <div class="account-summary-card">
+                        <div class="summary-item">
+                            <span class="summary-label">Available Margin</span>
+                            <span id="portfolio-balance" class="summary-val font-mono">$0.00</span>
+                        </div>
+                        <div class="summary-grid">
+                            <div class="summary-item">
+                                <span class="summary-label">Unrealized PnL</span>
+                                <span id="portfolio-unrealized" class="summary-val font-mono neutral">$0.00</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Margin Usage</span>
+                                <span id="portfolio-margin-util" class="summary-val font-mono">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="positions-header">
+                        <h3>Open Positions</h3>
+                    </div>
+                    <div id="positions-list" class="positions-list scrollable">
+                        <div class="no-positions">No open positions</div>
+                    </div>
+                </div>
+
+                <!-- EMERGENCY ACTION SECTION -->
+                <div class="right-panel-section emergency-section">
+                    <button id="btn-emergency-stop" class="btn btn-danger btn-block btn-lg">
+                        <i class="fa-solid fa-radiation"></i> EMERGENCY FLAT & STOP
+                    </button>
+                </div>
+            </aside>
+
+        </div>
+    </div>
+
+    <!-- Lightbox Modal for enlarged K-Line charts -->
+    <div id="lightbox-modal" class="lightbox-modal">
+        <span class="close-lightbox">&times;</span>
+        <img class="lightbox-content" id="lightbox-img" alt="Enlarged Chart">
+        <div id="lightbox-caption"></div>
+    </div>
+
+    <script type="module" src="/static/app.js"></script>
+</body>
+</html>

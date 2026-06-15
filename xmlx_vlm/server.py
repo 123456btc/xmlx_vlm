@@ -48,8 +48,8 @@ def main():
     parser.add_argument(
         "--port",
         type=int,
-        default=8080,
-        help="Port for the HTTP server (default: 8080)",
+        default=5118,
+        help="Port for the HTTP server (default: 5118)",
     )
     parser.add_argument(
         "--trust-remote-code",

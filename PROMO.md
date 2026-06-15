@@ -52,7 +52,7 @@ TurboQuant KV 压缩 = 70B 模型在 128GB Mac 上流畅运行
 【6/8】兼容性帖
 OpenAI SDK？Claude SDK？都支持。
 
-把 base URL 改成 localhost:8080，一行代码不改。
+把 base URL 改成 localhost:5118，一行代码不改。
 Cursor、Claude Code、LangChain、PydanticAI 全部接入。
 
 本地大脑，熟悉的接口。
@@ -90,8 +90,6 @@ git clone 即用，5 分钟部署。
 
 https://github.com/123456btc/xmlx_vlm
 
----
-
 ## 方案 C：金融垂直版（精准打击量化圈）
 
 量化人的噩梦：你把 proprietary 因子喂给 GPT-4，它在下一个版本里"巧合地"学会了类似的策略。
@@ -101,7 +99,7 @@ XMLX-VLM 解法：
 → Thinking 模式推理因子失效假设
 → JSON Schema 输出标准化因子定义
 → MCP 调用本地回测引擎
-→ AI Trader 实时分析 Hyperliquid 行情、盘口、资金费率，本地做决策
+→ AI Trader：本地行情 WS 常驻，单请求 Bull/Bear 多空对抗辩论规避单边偏见，平仓自动反思复盘并写入本地 SQLite 记忆环进行自适应闭环学习
 
 全程零网络调用。你的 alpha，永远只属于你。
 
@@ -171,7 +169,7 @@ One engine. Every sensitive domain.
 【6/8】
 OpenAI SDK? Claude SDK? Both supported.
 
-Change base URL to localhost:8080. Zero code changes.
+Change base URL to localhost:5118. Zero code changes.
 Cursor, Claude Code, LangChain, PydanticAI — all connected.
 
 Local brain. Familiar interface.
@@ -261,9 +259,9 @@ https://github.com/123456btc/xmlx_vlm
 
 ---
 
-## 方案 K：AI Trader 本地量化助手版（中文 Thread，8 条）
+## 方案 K：AI Trader 本地量化助手版（中文 Thread，10 条）
 
-【1/8】钩子帖
+【1/10】钩子帖
 你把 K 线图、盘口、资金费率截图发给云端 AI 分析，
 
 它不光"看见"了你的策略思路，还可能把它变成下一版模型的"常识"。
@@ -272,19 +270,19 @@ https://github.com/123456btc/xmlx_vlm
 
 🧵
 
-【2/8】定位帖
+【2/10】定位帖
 XMLX-VLM 新增 AI Trader
 
 = Apple Silicon 上的私有化量化分析助手
 
 ✅ 统一 Hyperliquid 数据源
 ✅ 5m / 15m / 1h 多周期聚合
-✅ L2 订单簿 + 逐笔成交流 + 资金费率 + 持仓量
-✅ 本地绘图 + 纸盘模拟
+✅ 单请求 Bull/Bear 多空对抗辩论规避单边偏见
+✅ 平仓自动反思复盘，写入本地 SQLite 记忆环进行自适应闭环学习
 
-你的 Mac = 行情终端 + 研究员 + 风控台。
+你的 Mac = 行情终端 + 研究员 + 辩论委员会 + 风控台。
 
-【3/8】数据源帖
+【3/10】数据源帖
 不是"接了个交易所 API"那么简单。
 
 AI Trader 从 Hyperliquid 实时拉取：
@@ -295,7 +293,7 @@ AI Trader 从 Hyperliquid 实时拉取：
 
 机构级数据，零网络泄露。
 
-【4/8】多周期帖
+【4/10】多周期帖
 只看 1h 就做判断？那是散户行为。
 
 AI Trader 默认同时分析：
@@ -305,7 +303,7 @@ AI Trader 默认同时分析：
 
 三周期共振才出信号，分歧就喊观望。
 
-【5/8】工具调用帖
+【5/10】工具调用帖
 你说"分析一下 ETH"，它不是聊天回复，而是：
 
 1. 调用 get_multi_timeframe_summary
@@ -315,7 +313,23 @@ AI Trader 默认同时分析：
 
 模型自己决定查什么、画什么、算什么。
 
-【6/8】隐私安全帖
+【6/10】多空对抗辩论帖
+怎么让本地小模型像顶尖分析师一样冷静？
+
+我们引入了“单请求对抗辩论（Adversarial Debate）”：
+- Bull Analyst 寻找做多逻辑，Bear Analyst 寻找做空隐患
+- 在同一个推理周期内自我反思与驳斥，得出最理性的共识决策
+- 既保留了辩论深度，又避免了多次本地 LLM 调用的高延迟！
+
+【7/10】闭环反思记忆帖
+亏损了？本地大脑不光写日志，还会学习。
+
+当一笔模拟/实盘订单平仓时：
+- 后台自动触发 Reflection Task 评估实际盈亏（PnL）
+- 总结进场、止损与行情误差，写入本地 SQLite 记忆库
+- 下次类似行情触发警报时，自动把历史教训注入 Context，实现真正的增量闭环学习。
+
+【8/10】隐私安全帖
 行情数据、持仓逻辑、策略偏好——
 
 在云 API 里跑一遍，就是一份不可撤销的数据赠与。
@@ -327,7 +341,7 @@ AI Trader 全部本地推理：
 
 你的 alpha，连路由器都不经过。
 
-【7/8】使用帖
+【9/10】使用帖
 ```bash
 ./service.sh start
 xmlx_vlm.ai-trader
@@ -341,7 +355,7 @@ xmlx_vlm.ai-trader
 
 5 分钟，你的 Mac 变成私有量化工作站。
 
-【8/8】CTA 帖
+【10/10】CTA 帖
 开源。MIT。
 
 git clone → pip install → ./service.sh start → xmlx_vlm.ai-trader
@@ -352,9 +366,9 @@ https://github.com/123456btc/xmlx_vlm
 
 ---
 
-## 方案 L：AI Trader English Thread（8 posts）
+## 方案 L：AI Trader English Thread（10 posts）
 
-【1/8】
+【1/10】
 Every chart, order-book screenshot, and funding-rate question you send to a cloud AI is a data donation.
 
 Your edge becomes their training data.
@@ -363,19 +377,19 @@ Local quant intelligence isn't nostalgia. It's survival.
 
 🧵
 
-【2/8】
+【2/10】
 Meet AI Trader on XMLX-VLM.
 
 = Private quant assistant running on Apple Silicon
 
 ✅ Unified Hyperliquid data feed
 ✅ 5m / 15m / 1h multi-timeframe analysis
-✅ L2 order book, trade flow, funding, open interest
-✅ Local chart rendering + paper trading
+✅ Single-request Bull/Bear adversarial debate to eliminate confirmation bias
+✅ Automated post-trade reflection logged to local SQLite for adaptive closed-loop learning
 
-Your Mac = terminal + researcher + risk desk.
+Your Mac = terminal + researcher + debate panel + risk desk.
 
-【3/8】
+【3/10】
 Not just "an exchange API wrapper".
 
 AI Trader pulls from Hyperliquid in real time:
@@ -386,7 +400,7 @@ AI Trader pulls from Hyperliquid in real time:
 
 Institutional-grade data. Zero network leakage.
 
-【4/8】
+【4/10】
 Analyzing on a single timeframe is amateur.
 
 AI Trader defaults to three:
@@ -396,7 +410,7 @@ AI Trader defaults to three:
 
 Only aligned signals get published. Divergence = wait.
 
-【5/8】
+【5/10】
 Say "analyze ETH" and it doesn't just chat.
 
 It calls:
@@ -407,7 +421,23 @@ It calls:
 
 The model decides what to query, plot, and compute.
 
-【6/8】
+【6/10】
+How do we make local LLMs make rational decisions like a wall street desk?
+
+We introduced "Single-Request Adversarial Debate":
+- A Bull Analyst defends the long setup, a Bear Analyst counters with short/flat risks.
+- They debate and reconcile to form a consensus in one single LLM round-trip.
+- Maximizes critical thinking depth while keeping local latency at a minimum!
+
+【7/10】
+Losses happen. But local brains learn from mistakes.
+
+Upon order closure:
+- A non-blocking background task starts a post-trade reflection.
+- Analyzes entry/exit offset and realized PnL, then writes lessons-learned into SQLite.
+- Feeds recent lessons back into the model's system prompt during future signals.
+
+【8/10】
 Your market data, your position logic, your strategy bias —
 
 Running it through a cloud API is an irreversible data gift.
@@ -419,7 +449,7 @@ AI Trader runs everything locally:
 
 Your alpha never touches a router.
 
-【7/8】
+【9/10】
 ```bash
 ./service.sh start
 xmlx_vlm.ai-trader
@@ -433,7 +463,7 @@ Then just chat:
 
 5 minutes. Your Mac becomes a private quant workstation.
 
-【8/8】
+【10/10】
 Open source. MIT.
 
 git clone → pip install → ./service.sh start → xmlx_vlm.ai-trader
@@ -546,6 +576,220 @@ XMLX-VLM 是私有化推理引擎（开源）。
 
 git clone → pip install → ./service.sh start
 5 分钟，你的 alpha 不再流浪。
+
+https://github.com/123456btc/xmlx_vlm
+
+---
+
+## 方案 M：AI Trader 日本語 Thread（10 posts）
+
+【1/10】
+チャート、板情報、資金調達率（ファンディングレート）のスクリーンショットをクラウドAIに送信するたびに、あなたの戦略データは無償で寄付されています。
+
+あなたのエッジが、彼らのトレーニングデータになってしまうのです。
+
+ローカルでのクオンツインテリジェンスは、単なる懐古趣味ではありません。生き残りのための必須条件です。
+
+🧵
+
+【2/10】
+XMLX-VLM に「AI Trader」が新登場。
+
+= Apple Silicon 上で動作するプライベートなローカル量化（クオンツ）アシスタント
+
+✅ Hyperliquid リアルタイムデータソース統合
+✅ 5分足 / 15分足 / 1時間足のマルチタイムフレーム分析
+✅ 単一リクエストでの Bull/Bear 対抗討論によるバイアスの排除
+✅ ローカル SQLite 記憶ループによるポジションクローズ後の自動反省・学習
+
+あなたの Mac ＝ 情報端末 ＋ 研究員 ＋ 討論パネル ＋ リスク管理デスク。
+
+【3/10】
+単なる「取引所 API ラッパー」ではありません。
+
+AI Trader は Hyperliquid からリアルタイムにデータを取得します：
+→ 最新価格 / 24時間高安 / 出来高
+→ L2 板の深さ、スプレッド、インバランス率
+→ 指値買い/売り圧力、大口注文（クジラ）検知
+→ ファンディングレート、未決済建玉（OI）、プレミアム
+
+機関投資家グレードのデータを、外部への漏洩ゼロで。
+
+【4/10】
+単一の時間軸だけで判断するのは素人です。
+
+AI Trader はデフォルトで3つの時間軸を同時に分析します：
+→ 5分足：短期のセンチメント
+→ 15分足：日中の構造
+→ 1時間足：トレンド構造
+
+シグナルが一致した時のみ実行し、不一致の場合は「待機」を選択。
+
+【5/10】
+「ETH を分析して」と指示すると、単にテキストで答えるだけでなく、以下のツールを呼び出します：
+
+1. get_multi_timeframe_summary
+2. get_market_summary
+3. ローカルで K 線チャートをレンダリング（Pillow）
+4. 構造化された分析結果 ＋ 交易提案を出力
+
+モデル自身が何を調べ、何を描き、何を計算すべきかを判断します。
+
+【6/10】
+ローカルの小型モデルをウォール街のプロのように冷静に判断させるには？
+
+「単一リクエストでの Bull/Bear 対抗討論（Adversarial Debate）」を導入しました：
+- Bull Analyst が買いの根拠を探し、Bear Analyst が空売りのリスクを指摘
+- 単一の推論サイクル内で自己批判と反論を行い、最も合理的な合意形成へ
+- 討論の深さを維持しつつ、ローカル LLM の複数回呼び出しによる高遅延を回避！
+
+【7/10】
+損失は発生します。しかし、ローカルの脳は失敗から学びます。
+
+ポジションがクローズされると：
+- バックグラウンドタスクが自動でポストトレード反省（Reflection）を実行
+- エントリー/エグジットのズレと実現損益（PnL）を分析し、ローカル SQLite に教訓を保存
+- 次回のシグナル発生時に、過去の教訓をシステムプロンプトのコンテキストへ自動注入。
+
+【8/10】
+市場データ、ポジション管理ロジック、戦略の偏り——
+
+これらをクラウド API で実行することは、取り返しのつかないデータの贈与です。
+
+AI Trader はすべてをローカルで推論します：
+→ サードパーティ의 데이터노드を経由しない
+→ クラウドでチャートを生成しない
+→ ペーパートレードのログはローカルに保存
+
+あなたの Alpha は、ルーターすら通過しません。
+
+【9/10】
+```bash
+./service.sh start
+xmlx_vlm.ai-trader
+```
+
+あとはチャットするだけ：
+- 「BTCの価格は？」
+- 「ETHの1時間足チャートを描いて」
+- 「板情報のインバランスは？」
+- 「0.01 BTC をデモ取引」
+
+5分で、あなたの Mac が完全プライベートなクオンツワークステーションになります。
+
+【10/10】
+オープンソース。MITライセンス。
+
+git clone → pip install → ./service.sh start → xmlx_vlm.ai-trader
+
+ローカルデータ、ローカル分析、ローカル意思決定。
+
+https://github.com/123456btc/xmlx_vlm
+
+---
+
+## 方案 N：AI Trader 한국어 Thread（10 posts）
+
+【1/10】
+차트, 호가창(L2), 펀딩비 스크린샷을 클라우드 AI에 보낼 때마다, 당신의 독점 전략 데이터는 무상으로 기부되고 있습니다.
+
+당신의 엣지(Edge)가 그들의 학습 데이터가 되는 것입니다.
+
+로컬 퀀트 인텔리전스는 과거의 향수가 아닙니다. 생존의 필수 조건입니다.
+
+🧵
+
+【2/10】
+XMLX-VLM에 "AI Trader"가 새롭게 추가되었습니다.
+
+= Apple Silicon에서 실행되는 나만의 사설 퀀트 트레이딩 비서
+
+✅ 통합 Hyperliquid 실시간 데이터 피드
+✅ 5분 / 15분 / 1시간 다중 프레임 통합 분석
+✅ 단일 요청 내 Bull/Bear 상호 토론으로 편향 극복
+✅ 포지션 청산 후 실시간 복기 및 로컬 SQLite 기반 자가 학습 루프
+
+당신의 Mac ＝ 시세 단말기 ＋ 연구원 ＋ 토론 패널 ＋ 리스크 관리 부서.
+
+【3/10】
+단순히 "거래소 API 래퍼"가 아닙니다.
+
+AI Trader는 Hyperliquid에서 직접 실시간 데이터를 가져옵니다:
+→ 현재가 / 24시간 고가·저가 / 거래량
+→ L2 호가 깊이, 스프레드, 매수/매도 불균형 비율
+→ 시장가 매수/매도 압력, 고래 거래 감지
+→ 펀딩비, 미결제약정(OI), 프리미엄
+
+기관급 데이터를 외부 노출 전혀 없이 받아보세요.
+
+【4/10】
+단일 시간대만 보고 판단하는 것은 초보적인 방식입니다.
+
+AI Trader는 기본적으로 세 가지 프레임을 동시 분석합니다:
+→ 5분: 단기 심리
+→ 15분: 당일 구조
+→ 1시간: 추세 구조
+
+세 프레임의 시그널이 일치할 때만 실행하며, 의견이 갈릴 때는 '관망'을 제시합니다.
+
+【5/10】
+"ETH 분석해줘"라고 입력하면 단순 텍스트 답변이 아닌, 다음과 같은 도구들을 직접 실행합니다:
+
+1. get_multi_timeframe_summary
+2. get_market_summary
+3. 로컬 K라인 차트 렌더링 (Pillow)
+4. 구조화된 분석 ＋ 트레이딩 제안 출력
+
+모델 스스로 무엇을 조회하고, 그리고, 계산할지 결정합니다.
+
+【6/10】
+로컬 소형 모델이 월스트리트 전문가처럼 침착하게 판단하도록 만드는 법은 무엇일까요?
+
+우리는 "단일 요청 내 대항적 토론(Adversarial Debate)"을 도입했습니다:
+- Bull Analyst가 매수 근거를 찾고, Bear Analyst가 숏/관망 위험을 지적합니다.
+- 단 한 번의 LLM 요청 내에서 스스로 반박하고 합의점에 도달합니다.
+- 토론의 깊이는 유지하면서, 로컬 LLM의 다중 호출로 인한 지연 시간(Latency)을 최소화했습니다!
+
+【7/10】
+손실은 발생할 수 있습니다. 하지만 로컬의 두뇌는 실수로부터 배웁니다.
+
+포지션이 청산될 때:
+- 백그라운드 태스크가 자동으로 사후 복기(Reflection)를 실행합니다.
+- 진입/청산 오차와 실현 손익(PnL)을 분석하고 로컬 SQLite에 학습 기록을 저장합니다.
+- 다음 신호 발생 시, 과거의 교훈을 시스템 프롬프트에 자동으로 주입하여 지식을 업데이트합니다.
+
+【8/10】
+시장 데이터, 포지션 로직, 전략적 편향——
+
+이러한 데이터를 클라우드 API에 입력하는 것은 영구적인 데이터 기부입니다.
+
+AI Trader는 모든 연산을 로컬에서 수행합니다:
+→ 제3자 데이터 노드를 거치지 않음
+→ 클라우드 차트 생성 없음
+→ 모의 거래 상태를 로컬 로그에만 저장
+
+당신의 Alpha는 인터넷 공유기조차 통과하지 않습니다.
+
+【9/10】
+```bash
+./service.sh start
+xmlx_vlm.ai-trader
+```
+
+그 후 대화를 시작하세요:
+- "BTC 지금 얼마야?"
+- "ETH 1시간 봉 차트 그려줘"
+- "호가창 매수 불균형 확인해줘"
+- "0.01 BTC 모의 거래 주문"
+
+5분 만에 당신의 Mac이 완전한 프라이빗 퀀트 워크스테이션으로 변신합니다.
+
+【10/10】
+오픈소스. MIT 라이선스.
+
+git clone → pip install → ./service.sh start → xmlx_vlm.ai-trader
+
+로컬 데이터, 로컬 분석, 로컬 의사결정.
 
 https://github.com/123456btc/xmlx_vlm
 

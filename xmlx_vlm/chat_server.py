@@ -10,13 +10,13 @@ Supports text, images, and video. Can use all server features:
 
 Usage:
     # Start the server first
-    xmlx_vlm serve --model mlx-community/diffusiongemma-26B-A4B-it-4bit --port 8080
+    xmlx_vlm serve --model mlx-community/diffusiongemma-26B-A4B-it-4bit --port 5118
 
     # Then run the chat UI
     xmlx_vlm chat_server
 
     # With auth and thinking
-    xmlx_vlm chat_server --server-url http://localhost:8080 --api-key mykey --enable-thinking
+    xmlx_vlm chat_server --server-url http://localhost:5118 --api-key mykey --enable-thinking
 """
 
 import argparse
@@ -275,15 +275,15 @@ def main():
         epilog="""
 Examples:
     xmlx_vlm chat_server
-    xmlx_vlm chat_server --server-url http://localhost:8080 --api-key mykey
+    xmlx_vlm chat_server --server-url http://localhost:5118 --api-key mykey
     xmlx_vlm chat_server --enable-thinking --thinking-budget 50
         """,
     )
     parser.add_argument(
         "--server-url",
         type=str,
-        default="http://localhost:8080",
-        help="xmlx_vlm server URL (default: http://localhost:8080)",
+        default="http://localhost:5118",
+        help="xmlx_vlm server URL (default: http://localhost:5118)",
     )
     parser.add_argument(
         "--api-key",

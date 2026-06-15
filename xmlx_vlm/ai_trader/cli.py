@@ -43,6 +43,13 @@ from xmlx_vlm.generate import stream_generate
 from xmlx_vlm.prompt_utils import apply_chat_template
 from xmlx_vlm.vision_cache import VisionFeatureCache
 
+import asyncio
+from xmlx_vlm.ai_trader.config import DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_SERVER_URL
+from xmlx_vlm.ai_trader.intelligence.brain import Brain, BrainConfig
+from xmlx_vlm.ai_trader.market_service.service import MarketDataService
+from xmlx_vlm.ai_trader.oms.config.settings import get_settings, reset_settings
+from xmlx_vlm.ai_trader.runtime.strategy_config import StrategyConfig
+from xmlx_vlm.ai_trader.runtime.trader_manager import TraderManager
 from xmlx_vlm.ai_trader.tools.registry import ToolRegistry
 
 
@@ -67,48 +74,41 @@ CALL_BRACE_PATTERN = re.compile(
 )
 
 
-DEFAULT_SYSTEM_PROMPT = """你是 AI Trader，一个本地运行的 AI 量化交易助手。用户通过自然语言与你对话，你可以调用工具完成行情分析、K 线图绘制、模拟交易等操作。
+DEFAULT_SYSTEM_PROMPT = """你是 AI Trader，一个专业的合约高频与量化交易专家。用户通过自然语言与你对话，你可以调用工具完成行情分析、K 线图绘制、模拟交易以及联网检索等操作。
 
 所有行情分析统一使用 Hyperliquid 数据源。
 
 当前可用工具：
 {tools_schema}
 
-机构级数据能力：
-- L1 行情：最新价、24h 高低点、涨跌幅、成交量
-- 多周期技术分析：默认同时看 5m（短线情绪）、15m（中短线结构）、1h（趋势结构），并给出多空共振/分歧结论
-- L2 订单簿：买卖深度、spread、深度失衡（depth imbalance）、VWAP
-- 逐笔成交：主动买卖压力、大单识别
-- 资金费率 / 持仓量
-- 综合市场摘要：一键获取价格、成交量、OI、funding、盘口失衡、成交流
+机构级数据能力与分析原则：
+- L1 行情：以 mark_price 为基准，分析 basis/premium（基差/溢价）。盘口名义价值统一使用格式化字符串（B/M/K），如 1.24B、12.4M、850K，严禁读错单位。
+- 多周期技术分析：优先调用 get_multi_timeframe_summary 获取 5m（短线情绪）、15m（中短线结构）、1h（趋势结构）三周期共振。ADX < 20 判定为震荡市，顺势做区间；ADX > 25 判定为强趋势。
+- 资金流向与筹码分布：CVD（累积成交量差）与 OI（持仓量）1h/24h 变化率（ΔOI）优先级高于原始买卖比例。
+- 联网检索规则：遇到任何需要获取实时新闻、常识或外部信息时，必须调用 web_search 工具，结合搜索结果用中文回答。
 
-分析原则：
-- 判断趋势或给出交易建议前，优先调用 get_multi_timeframe_summary 获取 5m/15m/1h 三周期结构，避免只看单一周期。
+合约交易核心算法与风控约束（给出任何交易建议/执行下单时必须遵守并明确向用户说明）：
 
-规则：
-1. 当需要查行情、画图、下单时，必须输出工具调用。可以使用以下任一格式：
+1. 动态仓位管理算法（Position Sizing）：
+   - 基于风险系数：单笔最大风险敞口控制在账户总权益的 1%-2%。仓位名义价值 = (账户权益 * 风险系数) / (止损距离比例)。
+   - 基于波动率（ATR）：止损距离优先采用 1.5 - 2.5 倍 ATR(14)。仓位名义价值 = (账户权益 * 风险系数) / (ATR * 乘数)。
+   - 凯利公式（Kelly Criterion）：基于胜率 W 和盈亏比 R 计算 f* = W - (1-W)/R。推荐四分之一凯利（0.25 * f*）进行微调。单笔名义价值绝对上限为账户权益的 20%。
 
-格式 A（推荐）：
-<tool_call>
-<function=工具名>
-<parameter=参数名>参数值</parameter>
-</function>
-</tool_call>
+2. 严格风控算法（Risk Control）：
+   - 强制双边止盈止损：入场建议必须带有明确的止损位（SL）与止盈位（TP），盈亏比必须 >= 1.5（推荐 >= 2.0）。
+   - 保证金警戒线：整体已用保证金使用率（Margin Utilization）上限为 50%。超过 50% 时只允许 wait/hold 或减仓/平仓，绝不新开仓。
+   - 最大回撤控制：当最大回撤达到 5% 时，应强烈建议停止开仓，进入观望与本金保护阶段。
+   - 保本损机制：当浮盈达到止盈目标的一半时，必须主动将止损位移动至开仓均价（保本损）。
 
-格式 B：
-<tool_call>{{"name": "工具名", "arguments": {{"参数名": "值"}}}}</tool_call>
+3. 加减仓与分批算法（Scaling In/Out）：
+   - 盈利金字塔加仓（Pyramid Adding）：仅在已有持仓盈利时允许同向加仓；加仓金额必须少于初次建仓金额（如前一次的 50%）。亏损持仓绝对不加仓。
+   - 减仓执行与锁盈：在关键阻力/支撑位，或趋势转弱时，调用 trading 的 close_position 进行部分减仓（如 50%）以锁定收益。
+   - 下单指引：
+     - 默认下单为 paper（纸盘模拟）。当需要执行部分减仓时，可计算对应减仓的名义价值（USD），在 `position_size_usd` 中填入该数值，或者告诉用户将要进行部分平仓；如果完全平仓，则不填或大于当前持仓价值。
+     - 涉及交易时，务必先做详细的风控与算法逻辑说明，明确告知用户这是模拟还是实盘。
+     - 如果用户要求急停，立即调用 trading action=emergency_stop。
 
-格式 C（部分模型输出）：
-<|tool_call>call:工具名{{参数名:值,参数名:值}}<tool_call|>
-
-2. 你可以在一次回复中连续调用多个工具。
-3. 工具结果会返回给你，你根据结果用中文向用户解释。
-4. 默认所有下单都是 paper（纸盘模拟），不会动用真实资金。
-5. 涉及交易时，务必先做风控说明，并明确告知用户这是模拟还是实盘。
-6. 如果用户要求急停，调用 trading action=emergency_stop。
-7. 交易对示例：BTC/USDC、ETH/USDC；调用 market_data 时无需指定 exchange。
-
-请保持专业、简洁。"""
+请保持专业、严谨、简洁。"""
 
 
 def build_system_prompt(registry: ToolRegistry) -> str:
@@ -534,6 +534,200 @@ class AITraderChat:
         rprint("[bold yellow]再见！[/bold yellow]")
 
 
+def _get_unlocked_kms_credentials() -> Dict[str, Dict[str, Any]]:
+    """获取解密后的 KMS 凭证."""
+    from xmlx_vlm.ai_trader.store.session_db import QuantSessionDB
+    from xmlx_vlm.ai_trader.store import vault
+    
+    db = QuantSessionDB()
+    password = os.environ.get("XMLX_VLM_VAULT_PASSWORD", "xmlx_vlm_default_secure_vault_passphrase_123456!")
+    
+    initialized = db.get_kms_config("vault_initialized") == "true"
+    if not initialized:
+        logger.info("KMS Vault is not initialized.")
+        return {}
+        
+    salt_hex = db.get_kms_config("vault_salt")
+    verifier_hex = db.get_kms_config("vault_verifier")
+    try:
+        salt = bytes.fromhex(salt_hex)
+        derived = vault.derive_key(password, salt)
+        if derived.hex() != verifier_hex:
+            logger.error("KMS Vault auto-unlock verifier mismatch.")
+            return {}
+    except Exception as e:
+        logger.error(f"Failed to verify vault password: {e}")
+        return {}
+        
+    encrypted_keys = db.list_kms_keys()
+    unlocked_creds = {}
+    for key_row in encrypted_keys:
+        key_id = key_row["key_id"]
+        full_row = db.get_encrypted_kms_key(key_id)
+        enc_payload_str = full_row["encrypted_private_key"]
+        try:
+            enc_dict = json.loads(enc_payload_str)
+            decrypted_private_key = vault.decrypt_data(enc_dict, password)
+            unlocked_creds[full_row["wallet_address"]] = {
+                "key_id": key_id,
+                "label": full_row["label"],
+                "wallet_address": full_row["wallet_address"],
+                "private_key": decrypted_private_key,
+                "testnet": bool(full_row["testnet"])
+            }
+        except Exception as e:
+            logger.error(f"Failed to decrypt key {key_id}: {e}")
+    return unlocked_creds
+
+
+async def _sync_strategies_with_watchlist(
+    trader_manager: TraderManager,
+    market_service: MarketDataService,
+    unlocked_kms_creds: Dict[str, Dict[str, Any]],
+    args: argparse.Namespace
+) -> None:
+    """动态同步 watchlist 币种的策略实例."""
+    watchlist = market_service.get_watched_coins()
+    if not watchlist:
+        logger.info("Watchlist is empty, waiting for market data service...")
+        return
+
+    desired_strategy_ids = set()
+
+    for coin in watchlist:
+        coin = coin.upper()
+        
+        # 1. Paper trading strategy
+        paper_id = f"trend_follow_{coin.lower()}_paper"
+        desired_strategy_ids.add(paper_id)
+        if not trader_manager.get(paper_id):
+            config = StrategyConfig(
+                id=paper_id,
+                name=f"{coin} Trend Follower (Paper)",
+                exchange="paper",
+                strategy_type="trend",
+                symbols=[f"{coin}/USDC"],
+                scan_interval_seconds=300,
+                enabled=True,
+                live_enabled=False,
+                dry_run=True,
+                server_url=args.server_url,
+                api_key=args.api_key,
+                model_path=args.model,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+            )
+            trader_manager.register(config)
+            logger.info("Dynamically registered strategy %s", paper_id)
+
+        paper_instance = trader_manager.get(paper_id)
+        if paper_instance and not paper_instance.is_running:
+            try:
+                await trader_manager.start(paper_id)
+                logger.info("Dynamically started strategy %s", paper_id)
+                await asyncio.sleep(15)  # 15s stagger delay
+            except Exception as e:
+                logger.error("Failed to start strategy %s: %s", paper_id, e)
+
+        # 2. Live trading strategies for unlocked KMS wallets
+        for wallet_address, cred in unlocked_kms_creds.items():
+            live_id = f"trend_follow_{coin.lower()}_hyperliquid"
+            desired_strategy_ids.add(live_id)
+            if not trader_manager.get(live_id):
+                config = StrategyConfig(
+                    id=live_id,
+                    name=f"{coin} Trend Follower (Hyperliquid)",
+                    exchange="hyperliquid",
+                    strategy_type="trend",
+                    symbols=[f"{coin}/USDC"],
+                    scan_interval_seconds=300,
+                    enabled=True,
+                    live_enabled=True,
+                    dry_run=False,
+                    server_url=args.server_url,
+                    api_key=args.api_key,
+                    model_path=args.model,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    wallet_address=cred["wallet_address"],
+                    private_key=cred["private_key"],
+                    testnet=cred["testnet"],
+                )
+                trader_manager.register(config)
+                logger.info("Dynamically registered live strategy %s", live_id)
+
+            live_instance = trader_manager.get(live_id)
+            if live_instance and not live_instance.is_running:
+                try:
+                    await trader_manager.start(live_id)
+                    logger.info("Dynamically started live strategy %s", live_id)
+                    await asyncio.sleep(15)  # 15s stagger delay
+                except Exception as e:
+                    logger.error("Failed to start live strategy %s: %s", live_id, e)
+
+    # Clean up strategies no longer in desired set
+    for sid in trader_manager.list_ids():
+        if sid not in desired_strategy_ids:
+            logger.info("Strategy %s no longer in watchlist, stopping and unregistering...", sid)
+            try:
+                await trader_manager.stop(sid)
+                trader_manager.unregister(sid)
+            except Exception as e:
+                logger.error("Failed to stop/unregister strategy %s: %s", sid, e)
+
+
+async def _run_auto_start(args: argparse.Namespace) -> None:
+    """运行 AI 策略引擎主循环."""
+    logger.info("Starting MarketDataService...")
+    market_service = MarketDataService()
+    market_service.start()
+
+    # 初始化 TraderManager
+    trader_manager = TraderManager(market_service=market_service)
+
+    # 获取 KMS 凭证
+    unlocked_kms_creds = _get_unlocked_kms_credentials()
+    logger.info("KMS Vault unlocked. Loaded %d live trading wallet(s).", len(unlocked_kms_creds))
+
+    try:
+        while True:
+            await _sync_strategies_with_watchlist(trader_manager, market_service, unlocked_kms_creds, args)
+            await asyncio.sleep(30)
+    except asyncio.CancelledError:
+        logger.info("Received stop signal.")
+    finally:
+        logger.info("Stopping all strategies and market service...")
+        await trader_manager.stop_all()
+        market_service.stop()
+
+
+def cmd_auto_start(args: argparse.Namespace) -> None:
+    """启动策略引擎自动交易守护进程."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        force=True
+    )
+    logger.info("Starting AI Strategy Engine daemon...")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    main_task = loop.create_task(_run_auto_start(args))
+    
+    try:
+        loop.run_until_complete(main_task)
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Shutdown signal received, cancelling main task...")
+        main_task.cancel()
+        try:
+            loop.run_until_complete(main_task)
+        except asyncio.CancelledError:
+            pass
+    finally:
+        loop.close()
+        logger.info("Strategy Engine daemon stopped.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Trader — 聊天即交易")
     parser.add_argument(
@@ -577,7 +771,42 @@ def main():
         default=None,
         help="非交互模式：直接执行一句指令后退出",
     )
+    parser.add_argument(
+        "--auto-start",
+        action="store_true",
+        help="自动启动后台策略引擎",
+    )
+    parser.add_argument(
+        "--auto-stop",
+        action="store_true",
+        help="停止后台策略引擎",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="查看后台策略引擎状态",
+    )
+    parser.add_argument(
+        "--emergency-stop",
+        action="store_true",
+        help="紧急停止所有仓位与策略",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="指定策略配置文件路径",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="启用实盘交易",
+    )
     args = parser.parse_args()
+
+    if args.auto_start:
+        cmd_auto_start(args)
+        return
 
     trader = AITraderChat(
         server_url=args.server_url,

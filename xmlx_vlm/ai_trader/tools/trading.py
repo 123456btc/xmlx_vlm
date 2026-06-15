@@ -1,15 +1,29 @@
-"""交易工具 —— 默认纸盘模式，可配置为实盘."""
+"""交易工具 —— 统一对接 OMS.
+
+默认纸盘模式；实盘交易需要 AI_TRADER_LIVE=1 环境变量 + CLI --live 参数。
+所有真实资金操作都经过 OMS 风控、审计、熔断、急停机制。
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from xmlx_vlm.ai_trader.config import DEFAULT_RISK, LOGS_DIR
+from xmlx_vlm.ai_trader.oms.config.settings import get_settings
+from xmlx_vlm.ai_trader.oms.core.oms_engine import OMSEngine
+from xmlx_vlm.ai_trader.oms.core.order import Order
+from xmlx_vlm.ai_trader.oms.exceptions import (
+    CircuitTrippedError,
+    LiveTradingNotEnabledError,
+    RiskRejectedError,
+)
 from xmlx_vlm.ai_trader.tools.market import MarketDataTool
 
 logger = logging.getLogger(__name__)
@@ -17,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PaperPosition:
+    """保留旧版纸盘仓位结构，用于兼容原有状态文件."""
+
     symbol: str
     side: str  # long / short
     qty: float
@@ -36,10 +52,13 @@ class PaperPosition:
 
 
 class TradingTool:
-    """交易执行工具：默认纸盘，可扩展实盘."""
+    """交易执行工具：统一通过 OMS 下单，支持 paper / live 模式."""
 
     name = "trading"
-    description = "执行交易操作：查询持仓、模拟/真实下单、平仓、紧急停止。默认使用纸盘模式。"
+    description = (
+        "执行交易操作：查询持仓、模拟/真实下单、平仓、紧急停止。"
+        "默认使用纸盘模式；实盘交易需要显式启用并配置 API 凭证。"
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -67,87 +86,110 @@ class TradingTool:
                 "description": "交易模式，默认 paper",
                 "default": "paper",
             },
+            "order_type": {
+                "type": "string",
+                "enum": ["market", "limit"],
+                "description": "订单类型，默认 market",
+                "default": "market",
+            },
+            "price": {
+                "type": "number",
+                "description": "限价单价格（order_type=limit 时必填）",
+            },
         },
         "required": ["action"],
     }
 
-    def __init__(self):
-        self.positions: Dict[str, PaperPosition] = {}
-        self.trades: List[Dict[str, Any]] = []
-        self.risk = DEFAULT_RISK.copy()
-        self.daily_pnl = 0.0
-        self.last_day = time.strftime("%Y-%m-%d")
-        self.market = MarketDataTool()
-        self._load_state()
+    def __init__(self, oms: Optional[OMSEngine] = None):
+        # 兼容旧版本地纸盘状态
+        self._legacy_positions: Dict[str, PaperPosition] = {}
+        self._legacy_trades: List[Dict[str, Any]] = []
+        self._legacy_daily_pnl = 0.0
+        self._legacy_last_day = time.strftime("%Y-%m-%d")
+        self._market = MarketDataTool()
+        self._load_legacy_state()
+
+        # OMS 引擎（懒加载）
+        self._oms: Optional[OMSEngine] = oms
+
+    @property
+    def oms(self) -> OMSEngine:
+        if self._oms is None:
+            settings = get_settings()
+            self._oms = OMSEngine(settings=settings, market_data_tool=self._market)
+        return self._oms
+
+    def _run_async(self, coro) -> Any:
+        """同步入口中运行异步协程."""
+        try:
+            return asyncio.run(coro)
+        except RuntimeError as exc:
+            # 如果已经在事件循环中（如某些测试环境），使用 nest_asyncio 风格
+            if "already running" in str(exc):
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(coro)
+            raise
 
     def _current_price(self, symbol: str) -> float:
-        text = self.market.get_ticker(symbol, "hyperliquid")
-        # text 形如 "BTC/USDC: last=64,321.50, bid=..., ask=..."
-        for part in text.split(","):
-            if "last=" in part:
-                value = part.split("=", 1)[1].strip()
-                return float(value.replace(",", ""))
+        import re
+
+        text = self._market.get_ticker(symbol, "hyperliquid")
+        # 匹配 mark=64,534.00 或 last=64,534.00，保留数字与逗号
+        match = re.search(r"(?:mark|last)=([\d,]+\.?\d*)", text)
+        if match:
+            return float(match.group(1).replace(",", ""))
         raise RuntimeError("无法从 Hyperliquid 获取当前价格")
 
-    def _state_path(self) -> Path:
+    def _legacy_state_path(self) -> Path:
         return LOGS_DIR / "paper_state.json"
 
-    def _load_state(self):
-        path = self._state_path()
+    def _load_legacy_state(self):
+        path = self._legacy_state_path()
         if path.exists():
             try:
                 data = json.loads(path.read_text())
-                self.positions = {
+                self._legacy_positions = {
                     k: PaperPosition(**v) for k, v in data.get("positions", {}).items()
                 }
-                self.trades = data.get("trades", [])
-                self.daily_pnl = data.get("daily_pnl", 0.0)
-                self.last_day = data.get("last_day", time.strftime("%Y-%m-%d"))
+                self._legacy_trades = data.get("trades", [])
+                self._legacy_daily_pnl = data.get("daily_pnl", 0.0)
+                self._legacy_last_day = data.get("last_day", time.strftime("%Y-%m-%d"))
             except Exception as exc:
-                logger.warning("加载纸盘状态失败: %s", exc)
+                logger.warning("加载旧版纸盘状态失败: %s", exc)
 
-    def _save_state(self):
+    def _save_legacy_state(self):
         try:
             data = {
-                "positions": {k: v.to_dict() for k, v in self.positions.items()},
-                "trades": self.trades,
-                "daily_pnl": self.daily_pnl,
-                "last_day": self.last_day,
+                "positions": {k: v.to_dict() for k, v in self._legacy_positions.items()},
+                "trades": self._legacy_trades,
+                "daily_pnl": self._legacy_daily_pnl,
+                "last_day": self._legacy_last_day,
             }
-            self._state_path().write_text(json.dumps(data, indent=2, ensure_ascii=False))
+            self._legacy_state_path().write_text(json.dumps(data, indent=2, ensure_ascii=False))
         except Exception as exc:
-            logger.warning("保存纸盘状态失败: %s", exc)
+            logger.warning("保存旧版纸盘状态失败: %s", exc)
 
-    def _reset_daily_if_needed(self):
-        today = time.strftime("%Y-%m-%d")
-        if today != self.last_day:
-            self.daily_pnl = 0.0
-            self.last_day = today
-
-    def _check_risk(self, action: str, symbol: str, qty: float, price: float) -> Optional[str]:
-        """返回 None 表示通过，否则返回拒绝理由."""
-        self._reset_daily_if_needed()
-
-        if action == "place_order":
-            # 简化的风控检查
-            notion = qty * price
-            if notion <= 0:
-                return "订单金额必须大于 0"
-            # 单日亏损检查（这里用当日已实现 pnl 近似）
-            if self.daily_pnl < -self.risk["max_daily_loss_pct"]:
-                return f"当日亏损已超过 {self.risk['max_daily_loss_pct']}% 限制，禁止新开仓"
-        return None
-
+    # ── 公开方法 ──
     def get_positions(self) -> str:
-        if not self.positions:
-            return "当前没有持仓"
-        lines = []
-        for pos in self.positions.values():
-            lines.append(
-                f"{pos.symbol} {pos.side}: qty={pos.qty}, entry={pos.entry_price:.2f}, "
-                f"pnl={pos.unrealized_pnl:.2f}"
-            )
-        return "\n".join(lines)
+        try:
+            result = self._run_async(self.oms.sync())
+            summary = self.oms.portfolio_summary()
+            positions = summary.get("positions", [])
+            if not positions:
+                return "当前没有持仓"
+            lines = []
+            for p in positions:
+                lines.append(
+                    f"{p['symbol']} {p['side']}: qty={p['qty']}, "
+                    f"entry={p['avg_entry_price']}, "
+                    f"mark={p['mark_price']}, "
+                    f"unrealized={p['unrealized_pnl']}, "
+                    f"realized={p['realized_pnl']}"
+                )
+            return "\n".join(lines)
+        except Exception as exc:
+            logger.exception("get_positions failed")
+            return f"查询持仓失败: {exc}"
 
     def place_order(
         self,
@@ -155,58 +197,83 @@ class TradingTool:
         side: str,
         qty: float,
         mode: str = "paper",
+        order_type: str = "market",
         price: Optional[float] = None,
     ) -> str:
-        if mode != "paper":
-            return "实盘模式尚未启用，请先使用 paper 模式验证策略"
+        settings = self.oms.settings
 
-        if price is None:
-            price = self._current_price(symbol)
-
-        risk_msg = self._check_risk("place_order", symbol, qty, price)
-        if risk_msg:
-            return f"风控拒绝: {risk_msg}"
-
-        # 纸盘成交
-        key = f"{symbol}_{side}"
-        if key in self.positions:
-            pos = self.positions[key]
-            total_qty = pos.qty + qty
-            pos.entry_price = (pos.entry_price * pos.qty + price * qty) / total_qty
-            pos.qty = total_qty
-        else:
-            self.positions[key] = PaperPosition(
-                symbol=symbol, side="long" if side == "buy" else "short", qty=qty, entry_price=price
+        # 如果请求 live 但当前系统未启用实盘（例如处于纸盘状态且没有激活的实盘 key），明确拒绝
+        if mode == "live" and not self.oms.is_live:
+            return (
+                "[拒绝] 实盘模式当前未启用（系统处于纸盘模拟状态）。\n"
+                "请先在 API 凭证管理页面中激活您的 API 密钥以启用实盘交易模式。"
             )
 
-        trade = {
-            "timestamp": time.time(),
-            "symbol": symbol,
-            "side": side,
-            "qty": qty,
-            "price": price,
-            "mode": mode,
-        }
-        self.trades.append(trade)
-        self._save_state()
-        return f"[{mode.upper()}] 已成交 {side} {qty} {symbol} @ {price:.2f}"
+        # 获取参考价格用于风控与名义金额计算
+        mark_price = oracle_price = None
+        try:
+            mark_price = Decimal(str(self._current_price(symbol)))
+            oracle_price = mark_price
+        except Exception as exc:
+            logger.warning("failed to get mark price for risk check: %s", exc)
+
+        # 构建订单：市价单无 price 时，用 mark_price 计算名义金额以通过风控
+        order_price = Decimal(str(price)) if price is not None else None
+        if order_type == "market" and order_price is None and mark_price is not None:
+            order_price = mark_price
+
+        order = self.oms.create_order(
+            symbol=symbol,
+            side=side,
+            qty=Decimal(str(qty)),
+            order_type=order_type,
+            price=order_price,
+        )
+
+        try:
+            result = self._run_async(
+                self.oms.submit_order(order, mark_price=mark_price, oracle_price=oracle_price)
+            )
+            status = result.get("status")
+            if status == "dry_run":
+                return (
+                    f"[DRY-RUN] 订单已通过风控，不会提交交易所\n"
+                    f"{result['order']}"
+                )
+            order_dict = result["order"]
+            exchange_mode = "LIVE" if self.oms.is_live else "PAPER"
+            return (
+                f"[{exchange_mode}] 已提交 {side} {qty} {symbol} @ "
+                f"{order_dict.get('avg_fill_price', 'pending')}\n"
+                f"状态: {order_dict['state']}"
+            )
+        except RiskRejectedError as exc:
+            return f"[风控拒绝] {exc.rule_name}: {exc.reason}"
+        except CircuitTrippedError as exc:
+            return f"[熔断] {exc.circuit_name}: {exc.reason}"
+        except LiveTradingNotEnabledError as exc:
+            return f"[实盘未启用] {exc}"
+        except Exception as exc:
+            logger.exception("place_order failed")
+            return f"下单失败: {exc}"
 
     def close_position(self, symbol: str) -> str:
-        closed = []
-        for key in list(self.positions.keys()):
-            if key.startswith(f"{symbol}_"):
-                pos = self.positions.pop(key)
-                closed.append(f"{pos.side} {pos.qty} @ {pos.entry_price:.2f}")
-        if not closed:
-            return f"没有找到 {symbol} 的持仓"
-        self._save_state()
-        return f"已平仓 {symbol}: " + ", ".join(closed)
+        try:
+            order = self._run_async(self.oms.close_position(symbol))
+            if order is None:
+                return f"没有找到 {symbol} 的持仓"
+            return f"已平仓 {order.symbol}: {order.side.value} {order.qty}"
+        except Exception as exc:
+            logger.exception("close_position failed")
+            return f"平仓失败: {exc}"
 
     def emergency_stop(self) -> str:
-        count = len(self.positions)
-        self.positions.clear()
-        self._save_state()
-        return f"急停已触发，已清空 {count} 个持仓，暂停所有新开仓"
+        try:
+            result = self._run_async(self.oms.emergency_stop(flatten=True))
+            return f"急停已触发，已清空持仓并锁定新开仓。详情: {result}"
+        except Exception as exc:
+            logger.exception("emergency_stop failed")
+            return f"急停失败: {exc}"
 
     def run(self, **kwargs) -> str:
         """工具统一入口."""
@@ -220,6 +287,8 @@ class TradingTool:
                     side=kwargs.get("side", ""),
                     qty=float(kwargs.get("qty", 0)),
                     mode=kwargs.get("mode", "paper"),
+                    order_type=kwargs.get("order_type", "market"),
+                    price=kwargs.get("price"),
                 )
             if action == "close_position":
                 return self.close_position(kwargs.get("symbol", ""))

@@ -1,7 +1,12 @@
 """
 Smoke-test: verify every route module can be imported and its router
 registered on a bare FastAPI app without a model loaded.
-Run from the project root:  python test_routes_imports.py
+
+Run via pytest:
+    python -m pytest xmlx_vlm/tests/test_routes_imports.py -v
+
+The test stubs heavy dependencies, performs the import/registration checks,
+and restores sys.modules so stubs do not leak to other tests.
 """
 import sys
 import types

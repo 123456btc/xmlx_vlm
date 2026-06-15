@@ -1,5 +1,10 @@
-"""AI Trader 默认配置."""
+"""AI Trader 默认配置.
 
+本文件是 service.sh 的 Python 端镜像。所有默认值应与 service.sh 保持一致，
+实现“改一处，到处生效”。环境变量优先于本文件默认值。
+"""
+
+import os
 from pathlib import Path
 
 # 项目内默认存储路径
@@ -9,6 +14,15 @@ LOGS_DIR = BASE_DIR / "logs"
 
 for d in (DATA_DIR, LOGS_DIR):
     d.mkdir(parents=True, exist_ok=True)
+
+# ── 本地推理服务配置（与 service.sh 保持一致）──
+DEFAULT_MODEL = os.getenv(
+    "XMLX_VLM_MODEL", "mlx-community/diffusiongemma-26B-A4B-it-4bit"
+)
+DEFAULT_PORT = int(os.getenv("XMLX_VLM_PORT", "5118"))
+DEFAULT_CHAT_PORT = int(os.getenv("XMLX_VLM_CHAT_PORT", "5119"))
+DEFAULT_API_KEY = os.getenv("XMLX_VLM_API_KEY", "x123456")
+DEFAULT_SERVER_URL = f"http://localhost:{DEFAULT_PORT}"
 
 # 默认交易所（统一使用 Hyperliquid）
 DEFAULT_EXCHANGE = "hyperliquid"

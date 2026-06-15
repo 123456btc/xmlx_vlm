@@ -50,7 +50,7 @@ def _maybe_clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 DEFAULT_SERVER_HOST = "0.0.0.0"
-DEFAULT_SERVER_PORT = 8080
+DEFAULT_SERVER_PORT = 5118
 DEFAULT_TOKEN_QUEUE_TIMEOUT = 600.0
 DEFAULT_FIRST_TOKEN_TIMEOUT = None  # No timeout for first token (prefill) by default
 

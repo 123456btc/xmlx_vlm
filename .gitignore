@@ -41,6 +41,17 @@ Thumbs.db
 .pids/
 .logs/
 
+# Secrets / environment
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*-wal
+*-shm
+
+
 # Test artifacts
 .pytest_cache/
 .coverage
@@ -55,3 +66,7 @@ htmlcov/
 *.pt
 *.pth
 *.ckpt
+
+# AI Trader data and logs
+xmlx_vlm/ai_trader/data/
+xmlx_vlm/ai_trader/logs/
