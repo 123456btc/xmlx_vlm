@@ -593,77 +593,81 @@ async def _sync_strategies_with_watchlist(
         return
 
     desired_strategy_ids = set()
+    symbols = [f"{coin.upper()}/USDC" for coin in watchlist]
 
-    for coin in watchlist:
-        coin = coin.upper()
-        
-        # 1. Paper trading strategy
-        paper_id = f"trend_follow_{coin.lower()}_paper"
-        desired_strategy_ids.add(paper_id)
-        if not trader_manager.get(paper_id):
+    # 1. Unified Paper trading strategy
+    paper_id = "trend_follow_all_paper"
+    desired_strategy_ids.add(paper_id)
+    if not trader_manager.get(paper_id):
+        config = StrategyConfig(
+            id=paper_id,
+            name="Trend Follower (Paper)",
+            exchange="paper",
+            strategy_type="trend",
+            symbols=symbols,
+            scan_interval_seconds=300,
+            enabled=True,
+            live_enabled=False,
+            dry_run=True,
+            server_url=args.server_url,
+            api_key=args.api_key,
+            model_path=args.model,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+        )
+        trader_manager.register(config)
+        logger.info("Dynamically registered unified strategy %s", paper_id)
+
+    paper_instance = trader_manager.get(paper_id)
+    if paper_instance:
+        paper_instance.config.symbols = symbols
+        if hasattr(paper_instance.engine, 'config'):
+            paper_instance.engine.config.candidate_symbols = symbols
+        if not paper_instance.is_running:
+            try:
+                await trader_manager.start(paper_id)
+                logger.info("Dynamically started unified strategy %s", paper_id)
+            except Exception as e:
+                logger.error("Failed to start unified strategy %s: %s", paper_id, e)
+
+    # 2. Unified Live trading strategies for unlocked KMS wallets
+    for wallet_address, cred in unlocked_kms_creds.items():
+        live_id = "trend_follow_all_hyperliquid"
+        desired_strategy_ids.add(live_id)
+        if not trader_manager.get(live_id):
             config = StrategyConfig(
-                id=paper_id,
-                name=f"{coin} Trend Follower (Paper)",
-                exchange="paper",
+                id=live_id,
+                name="Trend Follower (Hyperliquid)",
+                exchange="hyperliquid",
                 strategy_type="trend",
-                symbols=[f"{coin}/USDC"],
+                symbols=symbols,
                 scan_interval_seconds=300,
                 enabled=True,
-                live_enabled=False,
-                dry_run=True,
+                live_enabled=True,
+                dry_run=False,
                 server_url=args.server_url,
                 api_key=args.api_key,
                 model_path=args.model,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
+                wallet_address=cred["wallet_address"],
+                private_key=cred["private_key"],
+                testnet=cred["testnet"],
             )
             trader_manager.register(config)
-            logger.info("Dynamically registered strategy %s", paper_id)
+            logger.info("Dynamically registered unified live strategy %s", live_id)
 
-        paper_instance = trader_manager.get(paper_id)
-        if paper_instance and not paper_instance.is_running:
-            try:
-                await trader_manager.start(paper_id)
-                logger.info("Dynamically started strategy %s", paper_id)
-                await asyncio.sleep(15)  # 15s stagger delay
-            except Exception as e:
-                logger.error("Failed to start strategy %s: %s", paper_id, e)
-
-        # 2. Live trading strategies for unlocked KMS wallets
-        for wallet_address, cred in unlocked_kms_creds.items():
-            live_id = f"trend_follow_{coin.lower()}_hyperliquid"
-            desired_strategy_ids.add(live_id)
-            if not trader_manager.get(live_id):
-                config = StrategyConfig(
-                    id=live_id,
-                    name=f"{coin} Trend Follower (Hyperliquid)",
-                    exchange="hyperliquid",
-                    strategy_type="trend",
-                    symbols=[f"{coin}/USDC"],
-                    scan_interval_seconds=300,
-                    enabled=True,
-                    live_enabled=True,
-                    dry_run=False,
-                    server_url=args.server_url,
-                    api_key=args.api_key,
-                    model_path=args.model,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    wallet_address=cred["wallet_address"],
-                    private_key=cred["private_key"],
-                    testnet=cred["testnet"],
-                )
-                trader_manager.register(config)
-                logger.info("Dynamically registered live strategy %s", live_id)
-
-            live_instance = trader_manager.get(live_id)
-            if live_instance and not live_instance.is_running:
+        live_instance = trader_manager.get(live_id)
+        if live_instance:
+            live_instance.config.symbols = symbols
+            if hasattr(live_instance.engine, 'config'):
+                live_instance.engine.config.candidate_symbols = symbols
+            if not live_instance.is_running:
                 try:
                     await trader_manager.start(live_id)
-                    logger.info("Dynamically started live strategy %s", live_id)
-                    await asyncio.sleep(15)  # 15s stagger delay
+                    logger.info("Dynamically started unified live strategy %s", live_id)
                 except Exception as e:
-                    logger.error("Failed to start live strategy %s: %s", live_id, e)
+                    logger.error("Failed to start unified live strategy %s: %s", live_id, e)
 
     # Clean up strategies no longer in desired set
     for sid in trader_manager.list_ids():

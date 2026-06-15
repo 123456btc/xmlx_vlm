@@ -170,22 +170,46 @@ def get_model_path(
     if not model_path.exists():
         if revision is None:
             revision = "main"
-        model_path = Path(
-            snapshot_download(
-                repo_id=path_or_hf_repo,
-                revision=revision,
-                allow_patterns=[
-                    "*.json",
-                    "*.safetensors",
-                    "*.py",
-                    "*.model",
-                    "*.tiktoken",
-                    "*.txt",
-                    "*.jinja",
-                ],
-                force_download=force_download,
+        try:
+            model_path = Path(
+                snapshot_download(
+                    repo_id=path_or_hf_repo,
+                    revision=revision,
+                    allow_patterns=[
+                        "*.json",
+                        "*.safetensors",
+                        "*.py",
+                        "*.model",
+                        "*.tiktoken",
+                        "*.txt",
+                        "*.jinja",
+                    ],
+                    force_download=force_download,
+                )
             )
-        )
+        except Exception as e:
+            logging.warning("HF snapshot download failed, attempting local-only load: %s", e)
+            try:
+                model_path = Path(
+                    snapshot_download(
+                        repo_id=path_or_hf_repo,
+                        revision=revision,
+                        allow_patterns=[
+                            "*.json",
+                            "*.safetensors",
+                            "*.py",
+                            "*.model",
+                            "*.tiktoken",
+                            "*.txt",
+                            "*.jinja",
+                        ],
+                        force_download=force_download,
+                        local_files_only=True,
+                    )
+                )
+            except Exception as inner_e:
+                logging.error("Local-only HF load failed: %s", inner_e)
+                raise e
     return model_path
 
 
