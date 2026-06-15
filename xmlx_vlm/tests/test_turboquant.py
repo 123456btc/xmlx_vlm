@@ -442,3 +442,71 @@ def test_turboquant_prefill_attention_matches_dequantized_attention():
     diff = mx.max(mx.abs(reference - quantized)).item()
     assert quantized.shape == reference.shape
     assert diff < 1e-4
+
+
+def test_turboquant_non_power_of_two_dimensions():
+    dim = 96
+    vectors = _sample_unit_vectors(64, dim)
+    
+    # 1. Test with enable_rht_padding = True (default)
+    codec_rht = _TurboQuantMSECodec(dim, 3, seed=42)
+    assert codec_rht.use_rht
+    state_rht = codec_rht.quantize(vectors)
+    reconstructed_rht = codec_rht.dequantize(state_rht)
+    mse_rht = mx.mean(mx.sum((vectors - reconstructed_rht) ** 2, axis=-1)).item()
+    assert mse_rht < 0.25
+    
+    # 2. Test with enable_rht_padding = False (fallback to dense rotation)
+    _TurboQuantMSECodec.enable_rht_padding = False
+    try:
+        codec_dense = _TurboQuantMSECodec(dim, 3, seed=42)
+        assert not codec_dense.use_rht
+        state_dense = codec_dense.quantize(vectors)
+        reconstructed_dense = codec_dense.dequantize(state_dense)
+        mse_dense = mx.mean(mx.sum((vectors - reconstructed_dense) ** 2, axis=-1)).item()
+        assert mse_dense < 0.05
+    finally:
+        _TurboQuantMSECodec.enable_rht_padding = True
+
+
+def test_turboquant_layer_wise_mixed_precision():
+    prompt_cache = []
+    for _ in range(8):
+        cache_layer = KVCache()
+        cache_layer.update_and_fetch(
+            mx.random.normal((1, 2, 8, 32)),
+            mx.random.normal((1, 2, 8, 32)),
+        )
+        prompt_cache.append(cache_layer)
+        
+    maybe_quantize_kv_cache(
+        prompt_cache,
+        quantized_kv_start=0,
+        kv_group_size=64,
+        kv_bits=3.5,
+        kv_quant_scheme="turboquant",
+    )
+    
+    # The last layer should be skipped (remains KVCache, not quantized)
+    assert isinstance(prompt_cache[-1], KVCache)
+    
+    # The first 7 layers should be quantized to TurboQuantKVCache
+    quantized_layers = prompt_cache[:-1]
+    for layer in quantized_layers:
+        assert isinstance(layer, TurboQuantKVCache)
+        
+    # Check the bit rates of the quantized layers
+    # Layer 0, 6 get 4.0 bits (boosted by 0.5)
+    # Layer 2, 4 get 3.0 bits (reduced by 0.5)
+    # Layer 1, 3, 5 get default 3.5 bits
+    assert quantized_layers[0].bits == pytest.approx(4.0)
+    assert quantized_layers[1].bits == pytest.approx(3.5)
+    assert quantized_layers[2].bits == pytest.approx(3.0)
+    assert quantized_layers[3].bits == pytest.approx(3.5)
+    assert quantized_layers[4].bits == pytest.approx(3.0)
+    assert quantized_layers[5].bits == pytest.approx(3.5)
+    assert quantized_layers[6].bits == pytest.approx(4.0)
+    
+    # Verify the average is exactly 3.5
+    avg_bits = sum(layer.bits for layer in quantized_layers) / len(quantized_layers)
+    assert avg_bits == pytest.approx(3.5)

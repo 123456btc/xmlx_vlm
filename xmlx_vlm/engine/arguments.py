@@ -55,6 +55,12 @@ class GenerationArguments:
     tenant_id: Optional[str] = None
     enable_tool_logits_bias: bool = DEFAULT_ENABLE_TOOL_LOGITS_BIAS
     session_id: Optional[str] = None
+    enable_specprefill: bool = False
+    specprefill_draft_model: Optional[str] = None
+    specprefill_keep_pct: float = 0.3
+    specprefill_chunk_size: int = 32
+    specprefill_n_lookahead: int = 8
+    specprefill_threshold: int = 512
 
     def to_generate_kwargs(self) -> dict:
         """Convert to kwargs dict for generate()/stream_generate()."""
@@ -80,6 +86,13 @@ class GenerationArguments:
             kw["logits_processors"] = self.logits_processors
         if self.tenant_id is not None:
             kw["apc_tenant"] = self.tenant_id
+        if self.enable_specprefill:
+            kw["enable_specprefill"] = self.enable_specprefill
+            kw["specprefill_draft_model"] = self.specprefill_draft_model
+            kw["specprefill_keep_pct"] = self.specprefill_keep_pct
+            kw["specprefill_chunk_size"] = self.specprefill_chunk_size
+            kw["specprefill_n_lookahead"] = self.specprefill_n_lookahead
+            kw["specprefill_threshold"] = self.specprefill_threshold
         return kw
 
     def maybe_add_tool_logits_bias(self, tokenizer, tools_present: bool) -> None:
@@ -292,6 +305,12 @@ def _build_gen_args(
         tenant_id=tenant_id,
         enable_tool_logits_bias=enable_tool_logits_bias,
         session_id=getattr(request, "session_id", None),
+        enable_specprefill=getattr(request, "enable_specprefill", False),
+        specprefill_draft_model=getattr(request, "specprefill_draft_model", None),
+        specprefill_keep_pct=getattr(request, "specprefill_keep_pct", 0.3),
+        specprefill_chunk_size=getattr(request, "specprefill_chunk_size", 32),
+        specprefill_n_lookahead=getattr(request, "specprefill_n_lookahead", 8),
+        specprefill_threshold=getattr(request, "specprefill_threshold", 512),
     )
     if processor is not None:
         args.logits_processors = _build_structured_logits_processors(request, processor, args)

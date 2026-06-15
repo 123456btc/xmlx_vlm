@@ -866,34 +866,6 @@ body {
     border-color: var(--color-accent);
 }
 
-.btn-watchlist-rotation {
-    background: none;
-    border: none;
-    color: var(--color-text-tertiary);
-    cursor: pointer;
-    font-size: 12px;
-    padding: 4px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all var(--transition-speed);
-}
-
-.btn-watchlist-rotation:hover {
-    color: var(--color-text);
-    background-color: rgba(20, 61, 61, 0.2);
-}
-
-@keyframes watchlist-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.btn-watchlist-rotation.active i {
-    animation: watchlist-spin 4s linear infinite;
-    color: var(--color-success);
-}
 
 .watchlist-container {
     padding: 8px 16px;
@@ -909,6 +881,8 @@ body {
 .watchlist-container::-webkit-scrollbar {
     display: none;
 }
+
+
 
 .watchlist-item {
     display: flex;

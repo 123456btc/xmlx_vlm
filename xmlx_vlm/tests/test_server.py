@@ -1065,3 +1065,12 @@ class TestBuildGenArgsDefaults:
         assert args.temperature == 0.2
         assert args.top_p == 0.5
         assert args.top_k == 10
+
+
+def test_chat_completions_close_endpoint(client):
+    response = client.post("/chat/completions/close")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert "running" in data["message"] or "sent" in data["message"]
+

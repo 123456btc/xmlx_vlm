@@ -1241,6 +1241,12 @@ def test_generate_cli_smoke(capsys):
         draft_model=None,
         draft_kind="dflash",
         draft_block_size=None,
+        enable_specprefill=False,
+        specprefill_draft_model=None,
+        specprefill_keep_pct=0.3,
+        specprefill_chunk_size=32,
+        specprefill_n_lookahead=8,
+        specprefill_threshold=512,
     )
     model = SimpleNamespace(config=SimpleNamespace(model_type="demo"))
     processor = SimpleNamespace()

@@ -23,25 +23,6 @@ function formatPrice(val) {
 // Tickers Sidebar (Watchlist) Loop
 export function startMarketLoop() {
     connectWatchlistWs();
-    
-    if (state.watchlistRotationActive) {
-        startWatchlistRotation();
-    }
-    
-    // Pause auto-rotation on hover
-    if (elements.watchlistContainer) {
-        if (!elements.watchlistContainer._hasHoverListeners) {
-            elements.watchlistContainer.addEventListener('mouseenter', () => {
-                stopWatchlistRotation();
-            });
-            elements.watchlistContainer.addEventListener('mouseleave', () => {
-                if (state.watchlistRotationActive) {
-                    startWatchlistRotation();
-                }
-            });
-            elements.watchlistContainer._hasHoverListeners = true;
-        }
-    }
 }
 
 export function connectWatchlistWs() {
@@ -148,21 +129,9 @@ export function renderWatchlist(list) {
         elements.watchlistContainer.appendChild(div);
     });
     
-    // Clone items for seamless marquee loop
-    const items = Array.from(elements.watchlistContainer.children);
-    if (items.length > 0) {
-        items.forEach(item => {
-            const clone = item.cloneNode(true);
-            elements.watchlistContainer.appendChild(clone);
-        });
-    }
-    
-    // Restore scroll position or set to middle for rotation room
+    // Restore scroll position
     if (savedScrollTop > 0) {
         elements.watchlistContainer.scrollTop = savedScrollTop;
-    } else if (state.watchlistRotationActive) {
-        const halfHeight = elements.watchlistContainer.scrollHeight / 2;
-        elements.watchlistContainer.scrollTop = halfHeight;
     }
     
     // Remove flash classes from both original and clone elements after 800ms
@@ -190,40 +159,14 @@ export async function updateWatchlist() {
     }
 }
 
-export function startWatchlistRotation() {
-    if (state.watchlistRotationInterval) {
-        clearInterval(state.watchlistRotationInterval);
-    }
-    
-    state.watchlistRotationInterval = setInterval(() => {
-        const container = elements.watchlistContainer;
-        if (!container || !state.watchlistRotationActive) return;
-        
-        const halfHeight = container.scrollHeight / 2;
-        const maxScroll = container.scrollHeight - container.clientHeight;
-        if (maxScroll <= 0) return;
-        
-        // Visually scroll down (content moves down, scrollTop decreases)
-        container.scrollTop -= 0.3; // 60fps smooth scrolling increment
-        
-        // Wrap around seamlessly
-        if (container.scrollTop <= 0) {
-            container.scrollTop = halfHeight;
-        }
-    }, 16); // ~60fps
-}
-
-export function stopWatchlistRotation() {
-    if (state.watchlistRotationInterval) {
-        clearInterval(state.watchlistRotationInterval);
-        state.watchlistRotationInterval = null;
-    }
-}
 
 // Portfolio & Positions Loop
 export function startPortfolioLoop() {
     updatePortfolio();
-    state.portfolioInterval = setInterval(updatePortfolio, 4000);
+    // 15s is sufficient for portfolio display — positions change slowly.
+    // The previous 4s interval caused full DOM rebuilds 15x/min, adding
+    // layout thrash cost on top of the watchlist WS updates.
+    state.portfolioInterval = setInterval(updatePortfolio, 15000);
 }
 
 export async function updatePortfolio() {

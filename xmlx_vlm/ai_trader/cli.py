@@ -678,8 +678,15 @@ async def _sync_strategies_with_watchlist(
 
 async def _run_auto_start(args: argparse.Namespace) -> None:
     """运行 AI 策略引擎主循环."""
-    logger.info("Starting MarketDataService...")
-    market_service = MarketDataService()
+    watchlist_env = os.getenv("XMLX_VLM_WATCHLIST", "").strip()
+    if watchlist_env:
+        watched_coins = [c.strip().upper() for c in watchlist_env.split(",") if c.strip()]
+        logger.info("Using custom watchlist: %s", watched_coins)
+        market_service = MarketDataService(watched_coins=watched_coins)
+    else:
+        watchlist_size = int(os.getenv("XMLX_VLM_WATCHLIST_SIZE", "30"))
+        logger.info("Using top-%d volume watchlist dynamic mode", watchlist_size)
+        market_service = MarketDataService(top_n=watchlist_size)
     market_service.start()
 
     # 初始化 TraderManager

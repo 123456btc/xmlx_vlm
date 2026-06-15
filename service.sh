@@ -12,6 +12,8 @@
 #   XMLX_VLM_CHAT_PORT   Chat UI port (default: 5119)
 #   XMLX_VLM_API_KEY     API key for auth (default: x123456)
 #   XMLX_VLM_ARGS        Extra args passed to server (e.g. --enable-thinking)
+#   XMLX_VLM_WATCHLIST   Comma-separated custom watchlist (e.g. BTC,ETH,SOL)
+#   XMLX_VLM_WATCHLIST_SIZE  Number of top volume coins to trade (default: 3)
 #
 # Direct server options (passed through to server):
 #   --draft-model MODEL         Speculative drafter model
@@ -43,6 +45,10 @@ CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
 
 # Computer Use mode: gui | autonomous | gui_voice | autonomous_voice
 COMPUTER_MODE="${XMLX_VLM_COMPUTER_MODE:-autonomous}"
+
+# Watchlist configuration
+WATCHLIST="${XMLX_VLM_WATCHLIST:-}"
+WATCHLIST_SIZE="${XMLX_VLM_WATCHLIST_SIZE:-3}"
 
 SERVER_PID_FILE="${PID_DIR}/server.pid"
 CHAT_PID_FILE="${PID_DIR}/chat.pid"
@@ -226,7 +232,13 @@ cmd_start() {
     if is_running "$STRATEGY_PID_FILE"; then
         echo "AI Strategy Engine already running (PID: $(cat "$STRATEGY_PID_FILE"))"
     else
-        echo "Starting AI Strategy Engine (Top-30 Watchlist Dynamic Mode)..."
+        export XMLX_VLM_WATCHLIST="${WATCHLIST}"
+        export XMLX_VLM_WATCHLIST_SIZE="${WATCHLIST_SIZE}"
+        if [[ -n "${WATCHLIST}" ]]; then
+            echo "Starting AI Strategy Engine (Custom Watchlist Mode: ${WATCHLIST})..."
+        else
+            echo "Starting AI Strategy Engine (Top-${WATCHLIST_SIZE} Watchlist Dynamic Mode)..."
+        fi
         # Start strategies CLI auto-start in the background
         nohup "$VENV_PYTHON" -u -m xmlx_vlm.ai_trader.cli \
             --server-url "http://localhost:${PORT}" \

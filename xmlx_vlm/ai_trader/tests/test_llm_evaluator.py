@@ -82,19 +82,34 @@ class TestLLMSignalEvaluator(unittest.TestCase):
 
     @patch("requests.post")
     def test_evaluate_success(self, mock_post):
-        # Mock successful response from local model server
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        # Mock successful responses from local model server
+        # Call 1: Strategy Analyst Proposal
+        mock_analyst = MagicMock()
+        mock_analyst.status_code = 200
+        mock_analyst.json.return_value = {
             "choices": [
                 {
                     "message": {
-                        "content": '```json\n{"debate": {"bull_case": "bull text", "bear_case": "bear text", "rebuttal": "rebuttal text"}, "decision": {"direction": "long", "confidence": 85, "stop_loss": 60000.0, "take_profit": 63000.0, "rationale": "Strong bull pattern"}}\n```'
+                        "content": '```json\n{"direction": "long", "confidence": 85, "stop_loss": 60000.0, "take_profit": 63000.0, "rationale": "Strong bull pattern"}\n```'
                     }
                 }
             ]
         }
-        mock_post.return_value = mock_response
+        
+        # Call 2: Risk Officer Review
+        mock_risk = MagicMock()
+        mock_risk.status_code = 200
+        mock_risk.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '```json\n{"approved": true, "feedback": "Approved", "adjusted_stop_loss": 60000.0, "adjusted_take_profit": 63000.0, "adjusted_size_usd": 1000.0}\n```'
+                    }
+                }
+            ]
+        }
+        
+        mock_post.side_effect = [mock_analyst, mock_risk]
 
         # Add a past reflection to DB to ensure prompt formatting works
         self.db.add_reflection("BTC/USDC", 10.0, {}, "Trend is friend.")
@@ -112,8 +127,80 @@ class TestLLMSignalEvaluator(unittest.TestCase):
         self.assertEqual(eval_res.stop_loss, Decimal("60000.0"))
         self.assertEqual(eval_res.take_profit, Decimal("63000.0"))
         self.assertEqual(eval_res.metadata["direction"], "long")
-        self.assertEqual(eval_res.metadata["rationale"], "Strong bull pattern")
-        self.assertIn("LLM Consensus: LONG (Confidence: 85)", eval_res.notes[0])
+        self.assertIn("Strong bull pattern", eval_res.metadata["rationale"])
+        self.assertIn("--- Debate Round 1 ---", eval_res.notes[0])
+
+    @patch("requests.post")
+    def test_evaluate_debate_with_adjustment(self, mock_post):
+        # Call 1: Analyst proposes long with tight stop loss
+        mock_analyst_1 = MagicMock()
+        mock_analyst_1.status_code = 200
+        mock_analyst_1.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '```json\n{"direction": "long", "confidence": 85, "stop_loss": 60950.0, "take_profit": 63000.0, "rationale": "Strong bull pattern"}\n```'
+                    }
+                }
+            ]
+        }
+        
+        # Call 2: Risk Officer rejects
+        mock_risk_1 = MagicMock()
+        mock_risk_1.status_code = 200
+        mock_risk_1.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '```json\n{"approved": false, "feedback": "Stop loss too tight, adjust to 60000.0", "adjusted_stop_loss": 60000.0, "adjusted_take_profit": 63000.0, "adjusted_size_usd": 1000.0}\n```'
+                    }
+                }
+            ]
+        }
+        
+        # Call 3: Analyst adjusts proposal
+        mock_analyst_2 = MagicMock()
+        mock_analyst_2.status_code = 200
+        mock_analyst_2.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '```json\n{"direction": "long", "confidence": 80, "stop_loss": 60000.0, "take_profit": 63000.0, "rationale": "Adjusted stop loss"}\n```'
+                    }
+                }
+            ]
+        }
+        
+        # Call 4: Risk Officer approves
+        mock_risk_2 = MagicMock()
+        mock_risk_2.status_code = 200
+        mock_risk_2.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '```json\n{"approved": true, "feedback": "Approved adjusted stop loss", "adjusted_stop_loss": 60000.0, "adjusted_take_profit": 63000.0, "adjusted_size_usd": 1000.0}\n```'
+                    }
+                }
+            ]
+        }
+        
+        mock_post.side_effect = [mock_analyst_1, mock_risk_1, mock_analyst_2, mock_risk_2]
+
+        event = IndicatorAlertEvent(symbol="BTC/USDC", timestamp_ms=1, alert_type="breakout", payload={"volume_confirmed": True})
+        eval_res = self.evaluator.evaluate(
+            event=event,
+            mark_price=Decimal("61000.0"),
+            atr=Decimal("500.0"),
+            portfolio_summary={"account": {"equity": "10000.0"}}
+        )
+
+        self.assertEqual(eval_res.symbol, "BTC/USDC")
+        self.assertEqual(eval_res.confidence, 80)
+        self.assertEqual(eval_res.stop_loss, Decimal("60000.0"))
+        self.assertEqual(eval_res.take_profit, Decimal("63000.0"))
+        self.assertEqual(eval_res.metadata["direction"], "long")
+        self.assertIn("Adjusted stop loss", eval_res.metadata["rationale"])
+        self.assertEqual(len(eval_res.metadata["debate_rounds"]), 2)
 
     @patch("requests.post")
     def test_evaluate_failure_fallback(self, mock_post):

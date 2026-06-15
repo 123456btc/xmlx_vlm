@@ -9,7 +9,8 @@ from typing import Any, Dict, List
 from pathlib import Path
 
 from xmlx_vlm.ai_trader.tools.market import MarketDataTool
-from xmlx_vlm.ai_trader.tools.chart import ChartTool
+# ChartTool removed: model uses structured kline+L2 feature data, not visual charts.
+# Re-add if visual chart analysis is needed in future.
 from xmlx_vlm.ai_trader.tools.trading import TradingTool
 from xmlx_vlm.ai_trader.tools.web_search import WebSearchTool, WebExtractTool
 
@@ -28,7 +29,7 @@ class ToolRegistry:
     ):
         self._tools: Dict[str, Any] = {}
         self.register(MarketDataTool())
-        self.register(ChartTool())
+        # ChartTool deliberately excluded: model uses structured feature data.
         self.register(WebSearchTool())
         self.register(WebExtractTool())
         self.register(

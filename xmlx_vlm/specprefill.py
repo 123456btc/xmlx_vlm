@@ -118,6 +118,8 @@ def _prefill_draft(model, tokens, cache, step_size=2048, cancel_check=None):
     if cancel_check is not None:
         cancel_check()
     logits = model(prompt[processed:][None], cache=cache)
+    if not isinstance(logits, mx.array) and hasattr(logits, "logits"):
+        logits = logits.logits
     mx.eval(logits)
     return logits
 
@@ -142,6 +144,8 @@ def _lookahead_decode(
         if cancel_check is not None:
             cancel_check()
         logits = model(y.reshape(1, -1), cache=cache)
+        if not isinstance(logits, mx.array) and hasattr(logits, "logits"):
+            logits = logits.logits
         y = sampler(logits[:, -1, :])
         mx.eval(y)
         generated.append(y.item())
@@ -436,7 +440,10 @@ def _get_attn_module(layer):
 
 def _get_rope(attn):
     """Get the RoPE module from an attention layer, or None."""
-    return getattr(attn, "rope", None) or getattr(attn, "rotary_emb", None)
+    rope = getattr(attn, "rope", None)
+    if rope is not None:
+        return rope
+    return getattr(attn, "rotary_emb", None)
 
 
 def _set_rope(attn, rope_module):
@@ -571,6 +578,8 @@ def sparse_prefill(
         if cancel_check is not None:
             cancel_check()
         logits = model(prompt[processed:][None], cache=cache)
+        if not isinstance(logits, mx.array) and hasattr(logits, "logits"):
+            logits = logits.logits
         mx.eval(logits)
 
     finally:

@@ -1,5 +1,3 @@
-"""AITraderAgent - Asynchronous agent loop with tool execution and session logging."""
-
 from __future__ import annotations
 
 import asyncio
@@ -8,8 +6,10 @@ import logging
 import uuid
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, AsyncGenerator
+from enum import Enum
 
 import requests
 from rich import print as rprint
@@ -23,8 +23,16 @@ from xmlx_vlm.ai_trader.config import DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_SE
 from xmlx_vlm.ai_trader.store.session_db import QuantSessionDB
 from xmlx_vlm.ai_trader.tools.registry import ToolRegistry
 from xmlx_vlm.ai_trader.cli import build_system_prompt, parse_tool_calls, remove_tool_calls
+from xmlx_vlm.ai_trader.agent.telemetry import QuantTracer
 
 logger = logging.getLogger(__name__)
+
+class AgentState(str, Enum):
+    PLANNING = "planning"
+    READONLY_EXECUTION = "readonly_execution"
+    APPROVAL_GATE = "approval_gate"
+    SENSITIVE_EXECUTION = "sensitive_execution"
+    COMPLETED = "completed"
 
 def sanitize_error(text: str) -> str:
     """Mask credentials (like private keys or addresses) in tool tracebacks before returning to LLM."""
@@ -364,148 +372,213 @@ class AITraderAgent:
                 content=user_input,
             )
 
-        # 3. Enter tool calling loop
+        # 3. Enter state-graph routing loop
         depth = 0
         max_depth = 5
-
-        while depth < max_depth:
-            db_messages = self.db.get_messages(session_id)
-            
-            # Stream text from model
-            model_output = ""
-            if self.use_server:
-                async for chunk_type, chunk in self._stream_from_server(db_messages):
-                    model_output += chunk
-                    yield {"type": chunk_type, "content": chunk}
-            else:
-                async for chunk_type, chunk in self._stream_from_local(db_messages):
-                    model_output += chunk
-                    yield {"type": chunk_type, "content": chunk}
-
-            # 4. Check for tool calls in the final accumulated output
-            tool_calls = parse_tool_calls(model_output)
-            if not tool_calls:
-                explanation = remove_tool_calls(model_output)
-                self.db.add_message(
-                    message_id=str(uuid.uuid4()),
-                    session_id=session_id,
-                    role="assistant",
-                    content=explanation or model_output,
-                )
-                break
-
-            # If tool calls are found:
-            explanation = remove_tool_calls(model_output)
-            if explanation:
-                self.db.add_message(
-                    message_id=str(uuid.uuid4()),
-                    session_id=session_id,
-                    role="assistant",
-                    content=explanation,
-                )
-
-            # Separate sensitive calls from read-only calls
-            sensitive_calls = []
-            readonly_calls = []
-            for call in tool_calls:
-                name = call.get("name")
-                args = call.get("arguments", {})
-                is_sensitive = (
-                    name == "trading"
-                    and args.get("action") in ["place_order", "close_position", "emergency_stop"]
-                )
-                if is_sensitive:
-                    sensitive_calls.append(call)
-                else:
-                    readonly_calls.append(call)
-
-            # A. Execute read-only tools in parallel (asyncio.gather)
-            if readonly_calls:
-                for call in readonly_calls:
-                    yield {"type": "tool_start", "name": call.get("name"), "arguments": call.get("arguments", {})}
-
-                # Define concurrent execution coroutines
-                async def run_readonly(c):
-                    n = c.get("name")
-                    a = c.get("arguments", {})
-                    logger.info("Executing concurrent tool: %s", n)
-                    try:
-                        out = await asyncio.to_thread(self.registry.execute, n, a)
-                        out = sanitize_error(out)
-                    except Exception as err:
-                        out = f"Error: {err}"
-                    
-                    chart_url = None
-                    if n == "render_chart" and isinstance(out, str) and "保存于" in out:
-                        path_str = out.split("保存于 ")[-1].strip()
-                        if Path(path_str).exists():
-                            filename = Path(path_str).name
-                            chart_url = f"/api/static/charts/{filename}"
-                    return c, out, chart_url
-
-                # Run parallel gathers
-                results = await asyncio.gather(*[run_readonly(c) for c in readonly_calls])
-
-                # Process results and yield tool_end events
-                for c, out, chart_url in results:
-                    n = c.get("name")
-                    if chart_url:
-                        yield {"type": "image_render", "url": chart_url}
-                    yield {
-                        "type": "tool_end",
-                        "name": n,
-                        "output": out,
-                        "chart_url": chart_url,
-                    }
-                    self.db.add_message(
-                        message_id=str(uuid.uuid4()),
-                        session_id=session_id,
-                        role="user",
-                        content=f"工具 {n} 的返回结果：\n{out}",
-                    )
-
-            # B. Execute sensitive tools sequentially, gating via approval
-            for call in sensitive_calls:
-                name = call.get("name")
-                args = call.get("arguments", {})
-                tool_call_id = call.get("id") or str(uuid.uuid4())
-
-                # Yield interactive approval event to frontend Client
-                yield {
-                    "type": "approval_required",
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "arguments": args,
-                }
-
-                # Await user decision over WebSocket
-                fut = asyncio.Future()
-                self.pending_approvals[tool_call_id] = fut
+        current_state = AgentState.PLANNING
+        
+        # Initialize Tracer
+        tracer = QuantTracer()
+        tracer.start_span("AITraderAgent.generate_stream", {"session_id": session_id})
+        
+        try:
+            while current_state != AgentState.COMPLETED and depth < max_depth:
+                t0_state = time.perf_counter()
                 
-                try:
-                    approved = await fut
-                except asyncio.CancelledError:
-                    approved = False
-                finally:
-                    self.pending_approvals.pop(tool_call_id, None)
+                if current_state == AgentState.PLANNING:
+                    db_messages = self.db.get_messages(session_id)
+                    
+                    # Stream text from model
+                    model_output = ""
+                    t0_llm = time.perf_counter()
+                    if self.use_server:
+                        async for chunk_type, chunk in self._stream_from_server(db_messages):
+                            model_output += chunk
+                            yield {"type": chunk_type, "content": chunk}
+                    else:
+                        async for chunk_type, chunk in self._stream_from_local(db_messages):
+                            model_output += chunk
+                            yield {"type": chunk_type, "content": chunk}
+                    
+                    # Tracing LLM call in agent_loop
+                    llm_duration = time.perf_counter() - t0_llm
+                    tracer.log_step("llm_planning_stream", llm_duration, {"session_id": session_id})
+                    
+                    # Check for tool calls
+                    tool_calls = parse_tool_calls(model_output)
+                    if not tool_calls:
+                        explanation = remove_tool_calls(model_output)
+                        self.db.add_message(
+                            message_id=str(uuid.uuid4()),
+                            session_id=session_id,
+                            role="assistant",
+                            content=explanation or model_output,
+                        )
+                        current_state = AgentState.COMPLETED
+                    else:
+                        explanation = remove_tool_calls(model_output)
+                        if explanation:
+                            self.db.add_message(
+                                message_id=str(uuid.uuid4()),
+                                session_id=session_id,
+                                role="assistant",
+                                content=explanation,
+                            )
+                        
+                        # Separate sensitive calls from read-only calls
+                        sensitive_calls = []
+                        readonly_calls = []
+                        for call in tool_calls:
+                            name = call.get("name")
+                            args = call.get("arguments", {})
+                            is_sensitive = (
+                                name == "trading"
+                                and args.get("action") in ["place_order", "close_position", "emergency_stop"]
+                            )
+                            if is_sensitive:
+                                sensitive_calls.append(call)
+                            else:
+                                readonly_calls.append(call)
+                        
+                        # Route next state
+                        if readonly_calls:
+                            current_state = AgentState.READONLY_EXECUTION
+                        elif sensitive_calls:
+                            current_state = AgentState.APPROVAL_GATE
+                        else:
+                            current_state = AgentState.COMPLETED
+                    
+                    tracer.log_step(f"state_{AgentState.PLANNING.value}", time.perf_counter() - t0_state)
 
-                if not approved:
-                    output = "[Rejected by User] The user cancelled execution for this trading tool."
+                elif current_state == AgentState.READONLY_EXECUTION:
+                    # Execute read-only tools
+                    for call in readonly_calls:
+                        yield {"type": "tool_start", "name": call.get("name"), "arguments": call.get("arguments", {})}
+
+                    # Define concurrent execution coroutines
+                    async def run_readonly(c):
+                        n = c.get("name")
+                        a = c.get("arguments", {})
+                        logger.info("Executing concurrent tool: %s", n)
+                        t0_tool = time.perf_counter()
+                        try:
+                            out = await asyncio.to_thread(self.registry.execute, n, a)
+                            out = sanitize_error(out)
+                        except Exception as err:
+                            out = f"Error: {err}"
+                        
+                        tracer.log_step(f"tool_{n}", time.perf_counter() - t0_tool, {"args": a})
+                        
+                        chart_url = None
+                        if n == "render_chart" and isinstance(out, str) and "保存于" in out:
+                            path_str = out.split("保存于 ")[-1].strip()
+                            if Path(path_str).exists():
+                                filename = Path(path_str).name
+                                chart_url = f"/api/static/charts/{filename}"
+                        return c, out, chart_url
+
+                    # Run parallel gathers
+                    results = await asyncio.gather(*[run_readonly(c) for c in readonly_calls])
+
+                    # Process results and yield tool_end events
+                    for c, out, chart_url in results:
+                        n = c.get("name")
+                        if chart_url:
+                            yield {"type": "image_render", "url": chart_url}
+                        yield {
+                            "type": "tool_end",
+                            "name": n,
+                            "output": out,
+                            "chart_url": chart_url,
+                        }
+                        self.db.add_message(
+                            message_id=str(uuid.uuid4()),
+                            session_id=session_id,
+                            role="user",
+                            content=f"工具 {n} 的返回结果：\n{out}",
+                        )
+                    
+                    # Clear processed readonly tools
+                    readonly_calls = []
+                    # Route to approval if sensitive calls exist, else plan again
+                    if sensitive_calls:
+                        current_state = AgentState.APPROVAL_GATE
+                    else:
+                        depth += 1
+                        current_state = AgentState.PLANNING
+                        
+                    tracer.log_step(f"state_{AgentState.READONLY_EXECUTION.value}", time.perf_counter() - t0_state)
+
+                elif current_state == AgentState.APPROVAL_GATE:
+                    # Get the next sensitive call
+                    current_sensitive_call = sensitive_calls[0]
+                    name = current_sensitive_call.get("name")
+                    args = current_sensitive_call.get("arguments", {})
+                    tool_call_id = current_sensitive_call.get("id") or str(uuid.uuid4())
+
+                    # Yield interactive approval event to frontend Client
                     yield {
-                        "type": "tool_end",
+                        "type": "approval_required",
+                        "tool_call_id": tool_call_id,
                         "name": name,
-                        "output": output,
-                        "chart_url": None,
+                        "arguments": args,
                     }
-                else:
-                    # Execute tool call
+
+                    # Await user decision over WebSocket
+                    fut = asyncio.Future()
+                    self.pending_approvals[tool_call_id] = fut
+                    
+                    try:
+                        approved = await fut
+                    except asyncio.CancelledError:
+                        approved = False
+                    finally:
+                        self.pending_approvals.pop(tool_call_id, None)
+
+                    if not approved:
+                        output = "[Rejected by User] The user cancelled execution for this trading tool."
+                        yield {
+                            "type": "tool_end",
+                            "name": name,
+                            "output": output,
+                            "chart_url": None,
+                        }
+                        # Save rejection message to DB
+                        self.db.add_message(
+                            message_id=str(uuid.uuid4()),
+                            session_id=session_id,
+                            role="user",
+                            content=f"工具 {name} 的返回结果：\n{output}",
+                        )
+                        # Remove from list and route back to planning
+                        sensitive_calls.pop(0)
+                        if not sensitive_calls:
+                            depth += 1
+                            current_state = AgentState.PLANNING
+                        else:
+                            current_state = AgentState.APPROVAL_GATE
+                    else:
+                        current_state = AgentState.SENSITIVE_EXECUTION
+                        
+                    tracer.log_step(f"state_{AgentState.APPROVAL_GATE.value}", time.perf_counter() - t0_state)
+
+                elif current_state == AgentState.SENSITIVE_EXECUTION:
+                    # Execute current sensitive tool call
+                    current_sensitive_call = sensitive_calls[0]
+                    name = current_sensitive_call.get("name")
+                    args = current_sensitive_call.get("arguments", {})
+                    
                     yield {"type": "tool_start", "name": name, "arguments": args}
                     logger.info("Executing approved sensitive tool: %s with args: %s", name, args)
+                    
+                    t0_tool = time.perf_counter()
                     try:
                         output = await asyncio.to_thread(self.registry.execute, name, args)
                         output = sanitize_error(output)
                     except Exception as err:
                         output = f"Execution Error: {err}"
+                    
+                    tracer.log_step(f"tool_{name}", time.perf_counter() - t0_tool, {"args": args})
 
                     # Log trade if it's trading execution
                     if name == "trading" and args.get("action") == "place_order" and "已提交" in output:
@@ -540,19 +613,33 @@ class AITraderAgent:
                         "chart_url": None,
                     }
 
-                # Save tool output to database as a user role message to feed back to the LLM
-                self.db.add_message(
-                    message_id=str(uuid.uuid4()),
-                    session_id=session_id,
-                    role="user",
-                    content=f"工具 {name} 的返回结果：\n{output}",
-                )
+                    # Save tool output to database as a user role message to feed back to the LLM
+                    self.db.add_message(
+                        message_id=str(uuid.uuid4()),
+                        session_id=session_id,
+                        role="user",
+                        content=f"工具 {name} 的返回结果：\n{output}",
+                    )
 
-            # Increment loop depth and continue to model generation
-            depth += 1
+                    # Remove completed sensitive call
+                    sensitive_calls.pop(0)
+                    if sensitive_calls:
+                        current_state = AgentState.APPROVAL_GATE
+                    else:
+                        depth += 1
+                        current_state = AgentState.PLANNING
+                        
+                    tracer.log_step(f"state_{AgentState.SENSITIVE_EXECUTION.value}", time.perf_counter() - t0_state)
 
-        if depth >= max_depth:
-            yield {"type": "error", "message": "Max tool calling loop depth reached."}
+            if depth >= max_depth:
+                yield {"type": "error", "message": "Max tool calling loop depth reached."}
+                tracer.end_span("max_depth_reached")
+            else:
+                tracer.end_span("success")
+                
+        except Exception as e:
+            tracer.end_span("failed", str(e))
+            raise e
 
         # Check if the title needs to be summarized (e.g. first user message)
         session = self.db.get_session(session_id)

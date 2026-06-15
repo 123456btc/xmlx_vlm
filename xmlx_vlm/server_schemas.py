@@ -357,12 +357,34 @@ class VLMRequest(FlexibleBaseModel):
     seed: int = Field(DEFAULT_SEED, description="Seed for random generation.")
     repetition_penalty: Optional[float] = Field(None, description="Repetition penalty.")
     logit_bias: Optional[Any] = Field(None, description="Logit bias dict.")
+    enable_specprefill: bool = Field(
+        False, description="Enable speculative prefill (SpecPrefill) for long prompts."
+    )
+    specprefill_draft_model: Optional[str] = Field(
+        None, description="Path or repo to the draft model for speculative prefill scoring."
+    )
+    specprefill_keep_pct: float = Field(
+        0.3, description="Percentage of prompt tokens to keep during sparse prefilling."
+    )
+    specprefill_chunk_size: int = Field(
+        32, description="Chunk size for speculative prefill scoring."
+    )
+    specprefill_n_lookahead: int = Field(
+        8, description="Number of lookahead tokens for speculative prefill scoring."
+    )
+    specprefill_threshold: int = Field(
+        512, description="Threshold length of prompt tokens to trigger speculative prefill."
+    )
     enable_thinking: Optional[bool] = Field(
         None,
         description=(
             "Override server thinking mode for this request. If omitted, the "
             "server default set by --enable-thinking is used."
         ),
+    )
+    release_kv: Optional[bool] = Field(
+        None,
+        description="Whether to release KV cache immediately after this request finishes.",
     )
     thinking_budget: Optional[Union[int, str]] = Field(
         None, description="Max thinking tokens or effort level (low/medium/high/xhigh)."

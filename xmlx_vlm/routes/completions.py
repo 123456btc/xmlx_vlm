@@ -482,6 +482,10 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                             token_iter.close()
                         except Exception:
                             pass
+                    from ..config import get_release_kv_after_request
+                    should_release = request.release_kv or get_release_kv_after_request()
+                    if should_release and get_store().response_generator is not None:
+                        get_store().response_generator.requests.put(("release_kv", None, None, None, None))
                     _maybe_clear_cache()
                     print("Stream finished, cache cleared.")
 
@@ -559,6 +563,10 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
                     output_tokens = gen_result.generation_tokens
                     peak_memory = gen_result.peak_memory
 
+                from ..config import get_release_kv_after_request
+                should_release = request.release_kv or get_release_kv_after_request()
+                if should_release and get_store().response_generator is not None:
+                    get_store().response_generator.requests.put(("release_kv", None, None, None, None))
                 _maybe_clear_cache()
 
                 reasoning, content = _split_thinking(full_text)
@@ -656,6 +664,10 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
             except Exception as e:
                 print(f"Error during generation: {e}")
                 traceback.print_exc()
+                from ..config import get_release_kv_after_request
+                should_release = request.release_kv or get_release_kv_after_request()
+                if should_release and get_store().response_generator is not None:
+                    get_store().response_generator.requests.put(("release_kv", None, None, None, None))
                 _maybe_clear_cache()
                 raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
 
@@ -666,9 +678,23 @@ async def chat_completions_endpoint(request: ChatRequest, http_request: Request,
         # Catch unexpected errors
         print(f"Unexpected error in /generate endpoint: {e}")
         traceback.print_exc()
+        from ..config import get_release_kv_after_request
+        should_release = request.release_kv or get_release_kv_after_request()
+        if should_release and get_store().response_generator is not None:
+            get_store().response_generator.requests.put(("release_kv", None, None, None, None))
         _maybe_clear_cache()
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {e}"
         )
+
+
+@router.post("/chat/completions/close")
+@router.post("/v1/chat/completions/close", include_in_schema=False)
+async def chat_completions_close(_=Depends(verify_api_key)):
+    if get_store().response_generator is not None:
+        get_store().response_generator.requests.put(("release_kv", None, None, None, None))
+        return {"status": "success", "message": "KV cache release command sent to GPU thread"}
+    return {"status": "success", "message": "No active response generator running"}
+
 
 

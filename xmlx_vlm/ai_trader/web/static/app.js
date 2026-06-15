@@ -4,7 +4,7 @@ import { loadSessions, sendMessage, uploadFile, selectSession } from './js/modul
 import { checkKmsStatus, initKmsVault, unlockKmsVault, lockKmsVault, addKmsKey, deactivateKmsKey, loadKmsAuditLogs } from './js/modules/kms.js';
 import { refreshExchangeData } from './js/modules/exchange.js';
 import { loadStrategyDecisions } from './js/modules/strategy.js';
-import { startMarketLoop, startPortfolioLoop, updateWatchlist, startWatchlistRotation, stopWatchlistRotation, updatePortfolio } from './js/modules/market.js';
+import { startMarketLoop, startPortfolioLoop, updateWatchlist, updatePortfolio } from './js/modules/market.js';
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
@@ -314,20 +314,5 @@ function setupEventListeners() {
             state.watchlistSortOption = e.target.value;
             elements.watchlistContainer.scrollTop = 0;
             updateWatchlist();
-        });
-    }
-    if (elements.btnWatchlistRotation) {
-        if (state.watchlistRotationActive) {
-            elements.btnWatchlistRotation.classList.add('active');
-        }
-        elements.btnWatchlistRotation.addEventListener('click', () => {
-            state.watchlistRotationActive = !state.watchlistRotationActive;
-            elements.btnWatchlistRotation.classList.toggle('active', state.watchlistRotationActive);
-            if (state.watchlistRotationActive) {
-                startWatchlistRotation();
-            } else {
-                stopWatchlistRotation();
-            }
-        });
     }
 }

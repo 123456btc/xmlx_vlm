@@ -75,8 +75,10 @@ class TestToolRegistry:
         registry = ToolRegistry()
         names = [t["function"]["name"] for t in registry.list_tools()]
         assert "market_data" in names
-        assert "render_chart" in names
         assert "trading" in names
+        # ChartTool is intentionally excluded: the model uses structured
+        # kline+L2 feature data, not visual chart images.
+        assert "render_chart" not in names
 
     @pytest.mark.skip(reason="需要网络连接，CI 中可选")
     def test_market_tool_ticker(self):

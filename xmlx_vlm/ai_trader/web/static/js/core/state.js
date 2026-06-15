@@ -13,8 +13,6 @@ export const state = {
     portfolioInterval: null,
     priceCache: {}, // Cache symbol -> price to compute tick directions
     watchlistSortOption: 'volume_24h',
-    watchlistRotationActive: true,
-    watchlistRotationInterval: null,
     stagedAttachmentsList: [],
     strategyPage: 1
 };
@@ -48,7 +46,6 @@ export const elements = {
     positionsList: document.getElementById('positions-list'),
     watchlistContainer: document.getElementById('watchlist-container'),
     watchlistSortSelect: document.getElementById('watchlist-sort-select'),
-    btnWatchlistRotation: document.getElementById('btn-watchlist-rotation'),
     
     lightboxModal: document.getElementById('lightbox-modal'),
     lightboxImg: document.getElementById('lightbox-img'),

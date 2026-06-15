@@ -168,6 +168,13 @@ class ResponseGenerator:
         self._idle_kv_release_timeout: Optional[float] = get_idle_kv_release_timeout()
         self._last_activity_time: float = time.time()
         self._idle_kv_released: bool = False
+        from ..config import get_serialize_requests
+        self.serialize_requests = get_serialize_requests()
+        logger.info(
+            "ResponseGenerator initialized (serialize_requests=%s, idle_kv_release_timeout=%s)",
+            self.serialize_requests,
+            self._idle_kv_release_timeout,
+        )
         self.prompt_cache_states: dict = {}
         self._thread = Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -468,15 +475,16 @@ class ResponseGenerator:
                 # blocking wait when idle so we don't spin.
                 new_items = []
                 if active:
-                    try:
-                        item = self.requests.get_nowait()
-                        if item is None:
-                            if self._stop:
-                                break
-                        else:
-                            new_items.append(item)
-                    except QueueEmpty:
-                        pass
+                    if not self.serialize_requests:
+                        try:
+                            item = self.requests.get_nowait()
+                            if item is None:
+                                if self._stop:
+                                    break
+                            else:
+                                new_items.append(item)
+                        except QueueEmpty:
+                            pass
                 else:
                     try:
                         item = self.requests.get(timeout=0.1)
@@ -488,6 +496,7 @@ class ResponseGenerator:
                     except QueueEmpty:
                         if (
                             self._idle_kv_release_timeout is not None
+                            and not self._idle_kv_released
                             and batch_gen is not None
                             and (time.time() - self._last_activity_time)
                             > self._idle_kv_release_timeout
@@ -495,13 +504,14 @@ class ResponseGenerator:
                             self._release_idle_kv(batch_gen)
                             batch_gen = None
 
-                while True:
-                    try:
-                        item = self.requests.get_nowait()
-                        if item is not None:
-                            new_items.append(item)
-                    except QueueEmpty:
-                        break
+                if not self.serialize_requests:
+                    while True:
+                        try:
+                            item = self.requests.get_nowait()
+                            if item is not None:
+                                new_items.append(item)
+                        except QueueEmpty:
+                            break
 
                 # Drop abandoned requests before doing more work.
                 cancelled = self._drain_cancellations()
@@ -515,7 +525,12 @@ class ResponseGenerator:
                             except Exception:
                                 pass
 
-                for rqueue, raw_inputs, prompt_tokens, args, images in new_items:
+                for item in new_items:
+                    if isinstance(item, tuple) and len(item) == 5 and item[0] == "release_kv":
+                        self._release_idle_kv(batch_gen)
+                        batch_gen = None
+                        continue
+                    rqueue, raw_inputs, prompt_tokens, args, images = item
                     if batch_gen is None:
                         batch_gen = BatchGenerator(
                             self.model.language_model,
@@ -623,17 +638,19 @@ class ResponseGenerator:
                         pending.append(item)
                 except QueueEmpty:
                     pass
-                while True:
-                    try:
-                        item = self.requests.get_nowait()
-                        if item is not None:
-                            pending.append(item)
-                    except QueueEmpty:
-                        break
+                if not self.serialize_requests:
+                    while True:
+                        try:
+                            item = self.requests.get_nowait()
+                            if item is not None:
+                                pending.append(item)
+                        except QueueEmpty:
+                            break
 
                 if not pending:
                     if (
                         self._idle_kv_release_timeout is not None
+                        and not self._idle_kv_released
                         and (time.time() - self._last_activity_time)
                         > self._idle_kv_release_timeout
                     ):
@@ -654,7 +671,11 @@ class ResponseGenerator:
                 if hasattr(lm, "_rope_deltas"):
                     lm._rope_deltas = None
 
-                for rqueue, raw_inputs, prompt_tokens, args, images in pending:
+                for item in pending:
+                    if isinstance(item, tuple) and len(item) == 5 and item[0] == "release_kv":
+                        self._release_idle_kv(None)
+                        continue
+                    rqueue, raw_inputs, prompt_tokens, args, images = item
                     input_ids, gen_kwargs = self._gpu_embed(raw_inputs, images)
                     uid = id(rqueue)
                     uids.append(uid)
@@ -880,6 +901,7 @@ class ResponseGenerator:
                 except QueueEmpty:
                     if (
                         self._idle_kv_release_timeout is not None
+                        and not self._idle_kv_released
                         and (time.time() - self._last_activity_time)
                         > self._idle_kv_release_timeout
                     ):
@@ -888,6 +910,10 @@ class ResponseGenerator:
                 if item is None and self._stop:
                     break
                 if item is None:
+                    continue
+
+                if isinstance(item, tuple) and len(item) == 5 and item[0] == "release_kv":
+                    self._release_idle_kv(None)
                     continue
 
                 rqueue, raw_inputs, prompt_tokens, args, images = item

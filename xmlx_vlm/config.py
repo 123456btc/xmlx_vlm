@@ -257,3 +257,28 @@ def get_top_logprobs_k() -> int:
 
 def get_prefill_step_size() -> int:
     return int(os.environ.get("PREFILL_STEP_SIZE", DEFAULT_PREFILL_STEP_SIZE))
+
+
+def get_serialize_requests() -> bool:
+    """Return whether the server should serialize all requests (max concurrency = 1).
+
+    Reads XMLX_VLM_SERIALIZE_REQUESTS env-var. Defaults to True on macOS (Darwin).
+    """
+    raw = os.environ.get("XMLX_VLM_SERIALIZE_REQUESTS")
+    if raw is None:
+        import platform
+        return platform.system() == "Darwin"
+    return raw.lower() in ("1", "true", "yes", "on")
+
+
+def get_release_kv_after_request() -> bool:
+    """Return whether the server should always release KV cache after every request.
+
+    Reads XMLX_VLM_RELEASE_KV_AFTER_REQUEST env-var. Defaults to True on macOS (Darwin).
+    """
+    raw = os.environ.get("XMLX_VLM_RELEASE_KV_AFTER_REQUEST")
+    if raw is None:
+        import platform
+        return platform.system() == "Darwin"
+    return raw.lower() in ("1", "true", "yes", "on")
+

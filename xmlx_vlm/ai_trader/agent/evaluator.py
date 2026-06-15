@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import requests
 import json
+import time
 from decimal import Decimal
 from typing import Any, Dict, Optional, List
 
@@ -14,6 +15,7 @@ from xmlx_vlm.ai_trader.agent.config import AgentObjective
 from xmlx_vlm.ai_trader.agent.decision import ActionType, SignalEvaluation, TradeProposal
 from xmlx_vlm.ai_trader.market_service.events import IndicatorAlertEvent
 from xmlx_vlm.ai_trader.oms.utils.decimal import to_decimal, ZERO
+from xmlx_vlm.ai_trader.agent.telemetry import QuantTracer
 
 logger = logging.getLogger(__name__)
 
@@ -254,11 +256,79 @@ class SignalEvaluator:
         return min(size, max_size)
 
 
+class AgentChatSession:
+    """Manages multi-agent conversation history, system prompt swapping, and LLM completions."""
+
+    def __init__(self, evaluator: LLMSignalEvaluator, system_prompt: str):
+        self.evaluator = evaluator
+        self.system_prompt = system_prompt
+        self.messages: List[Dict[str, Any]] = []
+
+    def add_message(self, role: str, content: str) -> None:
+        self.messages.append({"role": role, "content": content})
+
+    def get_last_response(self) -> Optional[str]:
+        if self.messages and self.messages[-1]["role"] == "assistant":
+            return self.messages[-1]["content"]
+        return None
+
+    def call(self, prompt: str, tracer: Optional[QuantTracer] = None) -> Optional[Dict[str, Any]]:
+        """Appends the prompt as a user message, runs completions, and parses the response."""
+        self.add_message("user", prompt)
+        
+        headers = {"Content-Type": "application/json"}
+        if self.evaluator.api_key:
+            headers["Authorization"] = f"Bearer {self.evaluator.api_key}"
+
+        payload_data = {
+            "model": self.evaluator.model_name,
+            "messages": [
+                {"role": "system", "content": self.system_prompt}
+            ] + self.messages,
+            "temperature": 0.2,
+            "max_tokens": 1024,
+            "stream": False
+        }
+        
+        t0 = time.perf_counter()
+        try:
+            resp = requests.post(
+                f"{self.evaluator.server_url.rstrip('/')}/v1/chat/completions",
+                json=payload_data,
+                headers=headers,
+                timeout=30.0
+            )
+            duration = time.perf_counter() - t0
+            
+            if resp.status_code == 200:
+                resp_json = resp.json()
+                content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                
+                # Trace LLM Call
+                prompt_tokens = resp_json.get("usage", {}).get("prompt_tokens", 0)
+                completion_tokens = resp_json.get("usage", {}).get("completion_tokens", 0)
+                if tracer:
+                    tracer.add_tokens(prompt_tokens, completion_tokens)
+                    tracer.log_step(
+                        "llm_chat_call",
+                        duration,
+                        {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+                    )
+                
+                self.add_message("assistant", content)
+                return self.evaluator._parse_json_response(content)
+            else:
+                logger.warning("Local LLM server returned status code %d", resp.status_code)
+        except Exception as e:
+            logger.warning("Local LLM server invocation failed: %s", e)
+        return None
+
+
 class LLMSignalEvaluator(SignalEvaluator):
     """LLM-based Signal Evaluator.
 
-    Uses a local LLM to run a single-request Bull/Bear debate and return a consensus decision,
-    incorporating past reflections/lessons learned from the SQLite database.
+    Uses a local LLM to run a multi-agent consensus debate between a Strategy Analyst
+    and a Risk Officer, incorporating past reflections/lessons learned from the SQLite database.
     """
 
     def __init__(
@@ -284,36 +354,61 @@ class LLMSignalEvaluator(SignalEvaluator):
         atr: Optional[Decimal] = None,
         portfolio_summary: Optional[Dict[str, Any]] = None,
     ) -> SignalEvaluation:
-        # 1. Fetch recent reflections from DB
-        recent_reflections = []
+        # Initialize Tracer
+        tracer = QuantTracer()
+        tracer.start_span("LLMSignalEvaluator.evaluate", {"symbol": event.symbol})
+        
         try:
-            recent_reflections = self.db.get_recent_reflections(limit=5)
-        except Exception as e:
-            logger.warning("Failed to fetch recent reflections: %s", e)
+            # 1. Fetch recent reflections from DB
+            recent_reflections = []
+            try:
+                recent_reflections = self.db.get_recent_reflections(limit=5)
+            except Exception as e:
+                logger.warning("Failed to fetch recent reflections: %s", e)
 
-        # 2. Format reflections for prompt
-        reflection_str = "No past reflections found."
-        if recent_reflections:
-            reflection_lines = []
-            for r in recent_reflections:
-                reflection_lines.append(
-                    f"- Symbol: {r['symbol']}, PnL: {r['pnl']} USD, Lesson: {r['lesson']}"
-                )
-            reflection_str = "\n".join(reflection_lines)
+            # 2. Format reflections for prompt
+            reflection_str = "No past reflections found."
+            if recent_reflections:
+                reflection_lines = []
+                for r in recent_reflections:
+                    reflection_lines.append(
+                        f"- Symbol: {r['symbol']}, PnL: {r['pnl']} USD, Lesson: {r['lesson']}"
+                    )
+                reflection_str = "\n".join(reflection_lines)
 
-        # 3. Extract event parameters
-        symbol = event.symbol.upper()
-        alert_type = event.alert_type
-        payload = event.payload or {}
-        equity = "0"
-        if portfolio_summary:
-            equity = str(portfolio_summary.get("account", {}).get("equity", "0"))
+            # 3. Extract event parameters
+            symbol = event.symbol.upper()
+            alert_type = event.alert_type
+            payload = event.payload or {}
+            equity = "0"
+            if portfolio_summary:
+                equity = str(portfolio_summary.get("account", {}).get("equity", "0"))
 
-        # 4. Formulate the debate prompt
-        prompt = f"""You are a professional quantitative contract trading desk.
-Evaluate the following trading signal and make a decision.
+            # Initialize debate state
+            notes = []
+            metadata = {
+                "portfolio_summary": portfolio_summary,
+                "debate_rounds": []
+            }
+            final_direction = "neutral"
+            final_confidence = 50
+            final_stop_loss = None
+            final_take_profit = None
+            final_rationale = "No consensus reached."
+            success = False
 
-To prevent confirmation bias, you must perform a structured debate between a Bull Analyst (seeking long arguments) and a Bear Analyst (seeking short/flat arguments).
+            # Create Agent Chat Sessions
+            analyst_session = AgentChatSession(self, "You are a professional quantitative contract trading expert.")
+            risk_session = AgentChatSession(self, "You are a strict risk management officer for a trading desk.")
+
+            # Multi-Agent Debate Loop (Max 2 Rounds)
+            for round_idx in range(1, 3):
+                notes.append(f"--- Debate Round {round_idx} ---")
+                
+                # Step A: Strategy Analyst Proposes
+                if round_idx == 1:
+                    analyst_prompt = f"""You are acting as the Strategy Analyst of a professional quantitative contract trading desk.
+Your task is to analyze the following trading signal, market context, and historical reflections, and propose a trading decision (long, short, or neutral).
 
 ### Recent Lessons Learned (Reflections from Past Trades):
 {reflection_str}
@@ -326,117 +421,168 @@ To prevent confirmation bias, you must perform a structured debate between a Bul
 - Alert Details: {json.dumps(payload, ensure_ascii=False)}
 - Portfolio Equity: {equity} USD
 
-### Debate Instructions:
-1. **Bull Argument**: Why we should go LONG.
-2. **Bear Argument**: Why we should go SHORT or stay FLAT.
-3. **Consensus & Rebuttal**: Reconcile both sides.
-4. **Final Decision**: Determine the direction (long, short, or neutral) and confidence. Suggest stop loss and take profit if any.
+### Instructions:
+Formulate your trade setup. You MUST reply ONLY with a valid JSON block inside ```json ... ``` code fence matching the structure below:
+```json
+{{
+  "direction": "long/short/neutral",
+  "confidence": 75,
+  "stop_loss": 60500.0,
+  "take_profit": 63000.0,
+  "rationale": "Reason for long/short/neutral choice based on context."
+}}
+```
+"""
+                else:
+                    # Round 2: Analyst gets feedback from Risk Officer
+                    prev_feedback = metadata["debate_rounds"][-1]["risk_officer"]
+                    analyst_prompt = f"""You are acting as the Strategy Analyst. The Risk Officer has rejected your previous trade proposal with the following feedback:
+{json.dumps(prev_feedback, ensure_ascii=False)}
+
+Please adjust your trade proposal (e.g. modify direction, stop loss, or take profit) to address the Risk Officer's concerns, or decide to stay neutral/flat.
+
+### Current Market Context:
+- Symbol: {symbol}
+- Current Mark Price: {mark_price}
+- ATR (14): {atr or 'N/A'}
 
 You MUST reply ONLY with a valid JSON block inside ```json ... ``` code fence matching the structure below:
 ```json
 {{
-  "debate": {{
-    "bull_case": "Bull case details",
-    "bear_case": "Bear case details",
-    "rebuttal": "Consensus and rebuttal details"
-  }},
-  "decision": {{
-    "direction": "long",
-    "confidence": 75,
-    "stop_loss": 60500.0,
-    "take_profit": 63000.0,
-    "rationale": "Rationale details"
-  }}
+  "direction": "long/short/neutral",
+  "confidence": 70,
+  "stop_loss": 60700.0,
+  "take_profit": 63000.0,
+  "rationale": "Adjusted rationale addressing the risk officer's concerns."
 }}
 ```
 """
 
-        # 5. Invoke local LLM server
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+                analyst_res = analyst_session.call(analyst_prompt, tracer=tracer)
+                if not analyst_res:
+                    notes.append("Strategy Analyst failed to respond.")
+                    break
+                
+                notes.append(f"Strategy Analyst Proposal: {json.dumps(analyst_res, ensure_ascii=False)}")
+                
+                direction = str(analyst_res.get("direction", "neutral")).lower()
+                confidence = int(analyst_res.get("confidence", 50))
+                stop_loss = analyst_res.get("stop_loss")
+                take_profit = analyst_res.get("take_profit")
+                rationale = analyst_res.get("rationale", "")
 
-        payload_data = {
-            "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": "You are a professional quantitative contract trading expert."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2,
-            "max_tokens": 1024,
-            "stream": False
-        }
-
-        success = False
-        decision_data = {}
-        try:
-            resp = requests.post(
-                f"{self.server_url.rstrip('/')}/v1/chat/completions",
-                json=payload_data,
-                headers=headers,
-                timeout=30.0
-            )
-            if resp.status_code == 200:
-                resp_json = resp.json()
-                content = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                decision_data = self._parse_json_response(content)
-                if decision_data:
+                if direction == "neutral":
+                    notes.append("Strategy Analyst decided to stay neutral/flat.")
+                    final_direction = "neutral"
+                    final_confidence = confidence
+                    final_stop_loss = None
+                    final_take_profit = None
+                    final_rationale = rationale
                     success = True
-            else:
-                logger.warning("Local LLM server returned status code %d", resp.status_code)
+                    break
+
+                # Step B: Risk Officer Prompt and Call
+                risk_prompt = f"""You are acting as the Risk Officer of a professional quantitative contract trading desk.
+Your task is to review the trade proposal submitted by the Strategy Analyst. You must enforce strict wind-control rules to ensure capital safety.
+
+### Trading Constraints & Risk Rules:
+- Account Equity: {equity} USD
+- Minimum Risk-Reward (RR) Ratio: {self.objective.position_constraint.min_risk_reward_ratio} (Take Profit distance / Stop Loss distance must be >= this value)
+- Stop Loss Sizing: Risk per unit (entry price - stop loss) should be proportional to ATR (typically 1.5 - 2.5 times ATR) and not exceed {self.objective.risk_budget.max_risk_pct_per_trade}% of total equity.
+- Current Mark Price: {mark_price}
+- ATR (14): {atr or 'N/A'}
+
+### Proposal under review:
+{json.dumps(analyst_res, ensure_ascii=False)}
+
+### Instructions:
+Determine if the proposal is safe to execute. If it violates any risk rules (e.g., RR ratio too low, stop loss too tight/wide, or risk too high), you must reject it and provide constructive feedback on how the Analyst should adjust the parameters (e.g., specific stop loss level or size).
+
+You MUST reply ONLY with a valid JSON block inside ```json ... ``` code fence matching the structure below:
+```json
+{{
+  "approved": true/false,
+  "feedback": "Why you approved or rejected the proposal.",
+  "adjusted_stop_loss": 60700.0,
+  "adjusted_take_profit": 63000.0,
+  "adjusted_size_usd": 1000.0
+}}
+```
+"""
+
+                risk_res = risk_session.call(risk_prompt, tracer=tracer)
+                if not risk_res:
+                    notes.append("Risk Officer failed to respond.")
+                    break
+
+                notes.append(f"Risk Officer Review: {json.dumps(risk_res, ensure_ascii=False)}")
+                
+                metadata["debate_rounds"].append({
+                    "round": round_idx,
+                    "strategy_analyst": analyst_res,
+                    "risk_officer": risk_res
+                })
+
+                approved = bool(risk_res.get("approved", False))
+                if approved:
+                    final_direction = direction
+                    final_confidence = confidence
+                    final_stop_loss = risk_res.get("adjusted_stop_loss") if risk_res.get("adjusted_stop_loss") is not None else stop_loss
+                    final_take_profit = risk_res.get("adjusted_take_profit") if risk_res.get("adjusted_take_profit") is not None else take_profit
+                    final_rationale = f"Consensus reached: {rationale} (Risk feedback: {risk_res.get('feedback', '')})"
+                    success = True
+                    notes.append("Risk Officer approved the proposal. Consensus reached!")
+                    break
+                else:
+                    notes.append(f"Risk Officer rejected the proposal. Feedback: {risk_res.get('feedback', '')}")
+
+            if not success and metadata["debate_rounds"]:
+                final_direction = "neutral"
+                final_confidence = 50
+                final_stop_loss = None
+                final_take_profit = None
+                final_rationale = "No consensus reached after debate rounds. Staying neutral."
+                success = True
+                notes.append("No consensus reached. Defaulting to neutral/flat.")
+
+            if not success:
+                if self.use_fallback:
+                    logger.info("Falling back to rule-based SignalEvaluator for %s", symbol)
+                    fallback_res = super().evaluate(event, mark_price, atr, portfolio_summary)
+                    tracer.end_span("fallback_success")
+                    return fallback_res
+                else:
+                    raise RuntimeError("LLMSignalEvaluator failed and fallback is disabled.")
+
+            sl_decimal = to_decimal(final_stop_loss) if final_stop_loss is not None else None
+            tp_decimal = to_decimal(final_take_profit) if final_take_profit is not None else None
+
+            rr = self._compute_rr(mark_price, sl_decimal, tp_decimal, final_direction)
+            expected_return_pct, expected_risk_pct = self._compute_expected_pct(
+                mark_price, sl_decimal, tp_decimal, final_direction
+            )
+
+            metadata["direction"] = final_direction
+            metadata["rationale"] = final_rationale
+
+            eval_res = SignalEvaluation(
+                signal_type=alert_type,
+                symbol=symbol,
+                confidence=final_confidence,
+                risk_reward_ratio=rr,
+                stop_loss=sl_decimal,
+                take_profit=tp_decimal,
+                expected_return_pct=expected_return_pct,
+                expected_risk_pct=expected_risk_pct,
+                notes=notes,
+                metadata=metadata
+            )
+            tracer.end_span("success")
+            return eval_res
+
         except Exception as e:
-            logger.warning("Local LLM server invocation failed: %s", e)
-
-        # 6. Fallback if failed or disabled
-        if not success:
-            if self.use_fallback:
-                logger.info("Falling back to rule-based SignalEvaluator for %s", symbol)
-                return super().evaluate(event, mark_price, atr, portfolio_summary)
-            else:
-                raise RuntimeError("LLMSignalEvaluator failed and fallback is disabled.")
-
-        # 7. Map parsed JSON to SignalEvaluation
-        dec = decision_data.get("decision", {})
-        dir_val = str(dec.get("direction", "neutral")).lower()
-        confidence = int(dec.get("confidence", 50))
-        stop_loss = dec.get("stop_loss")
-        take_profit = dec.get("take_profit")
-        rationale = dec.get("rationale", "")
-
-        notes = [
-            f"LLM Consensus: {dir_val.upper()} (Confidence: {confidence})",
-            f"Rationale: {rationale}",
-            f"Bull Case: {decision_data.get('debate', {}).get('bull_case', '')}",
-            f"Bear Case: {decision_data.get('debate', {}).get('bear_case', '')}"
-        ]
-
-        # Convert SL / TP to Decimal if present
-        sl_decimal = to_decimal(stop_loss) if stop_loss is not None else None
-        tp_decimal = to_decimal(take_profit) if take_profit is not None else None
-
-        # Compute risk reward & expected return
-        rr = self._compute_rr(mark_price, sl_decimal, tp_decimal, dir_val)
-        expected_return_pct, expected_risk_pct = self._compute_expected_pct(
-            mark_price, sl_decimal, tp_decimal, dir_val
-        )
-
-        return SignalEvaluation(
-            signal_type=alert_type,
-            symbol=symbol,
-            confidence=confidence,
-            risk_reward_ratio=rr,
-            stop_loss=sl_decimal,
-            take_profit=tp_decimal,
-            expected_return_pct=expected_return_pct,
-            expected_risk_pct=expected_risk_pct,
-            notes=notes,
-            metadata={
-                "direction": dir_val,
-                "debate": decision_data.get("debate", {}),
-                "rationale": rationale,
-                "portfolio_summary": portfolio_summary,
-            }
-        )
+            tracer.end_span("failed", str(e))
+            raise e
 
     def _parse_json_response(self, text: str) -> Optional[Dict[str, Any]]:
         """Extract and parse JSON block from LLM output."""

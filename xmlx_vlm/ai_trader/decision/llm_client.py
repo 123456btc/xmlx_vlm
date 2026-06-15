@@ -110,6 +110,7 @@ class LocalServiceLLMClient(BaseLLMClient):
             "stream": True,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            "release_kv": True,
         }
 
         text = ""

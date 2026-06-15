@@ -50,6 +50,7 @@ class MarketDataService:
         top_n: int = 30,
         refresh_interval_sec: int = 60,
         alert_config: Optional[AlertConfig] = None,
+        watched_coins: Optional[List[str]] = None,
     ) -> None:
         self.event_bus = event_bus or EventBus()
         self.state = MarketState()
@@ -72,6 +73,11 @@ class MarketDataService:
 
         self._alert_engine = AlertEngine(self.state, self.event_bus, alert_config)
         self._parser = HyperliquidMessageParser()
+        # Throttle allMids event publishing: only publish when price moves > threshold.
+        # Eliminates the constant flood of PriceUpdateEvents for unchanged prices.
+        self._last_published_price: dict[str, float] = {}
+        self._price_publish_threshold = 0.0001  # 0.01% minimum move to trigger publish
+        self._watched_coins = [c.upper() for c in watched_coins] if watched_coins else None
 
     # ── 生命周期 ──
     def start(self) -> None:
@@ -111,13 +117,17 @@ class MarketDataService:
         )
         self._client.start()
         
-        # Subscribe to allMids exactly once
-        self._client.subscribe("allMids")
-
-        # 启动时拉取成交额前 N 名并订阅
-        self._loop.create_task(self._refresh_top_coins())
-        # 定时刷新排名
-        self._refresh_task = self._loop.create_task(self._refresh_loop())
+        if self._watched_coins is not None:
+            # Subscribe to custom watched coins directly
+            for coin in self._watched_coins:
+                self.subscribe(coin)
+        else:
+            # Subscribe to allMids exactly once
+            self._client.subscribe("allMids")
+            # 启动时拉取成交额前 N 名并订阅
+            self._loop.create_task(self._refresh_top_coins())
+            # 定时刷新排名
+            self._refresh_task = self._loop.create_task(self._refresh_loop())
 
         # 恢复已有订阅
         with self._lock:
@@ -409,6 +419,8 @@ class MarketDataService:
                 logger.error("All refresh top coins attempts failed: %s", e2)
 
     def get_watched_coins(self) -> List[str]:
+        if self._watched_coins is not None:
+            return sorted(self._watched_coins)
         with self._lock:
             if hasattr(self, "_top_coins") and self._top_coins:
                 return sorted(self._top_coins)
@@ -434,7 +446,7 @@ class MarketDataService:
         mids = self._parser.parse_all_mids(msg)
         now = int(time.time() * 1000)
         for coin, price in mids.items():
-            # 处理已订阅、在watchlist中、或已在内存状态中的币对
+            # Only process coins we care about
             with self._lock:
                 is_watched = (
                     coin in self._subscribed_coins or
@@ -445,9 +457,14 @@ class MarketDataService:
                     continue
             sym_state = self.state.get(coin, create=True)
             sym_state.update_tick(Tick(symbol=coin, price=price, timestamp_ms=now))
-            self.event_bus.publish(
-                PriceUpdateEvent(symbol=coin, timestamp_ms=now, price=price, source="mid")
-            )
+            # Throttle: only publish PriceUpdateEvent when price changed meaningfully.
+            # Without this, every allMids push (1/s) fires events for 100+ coins.
+            last = self._last_published_price.get(coin)
+            if last is None or last == 0.0 or abs(price - last) / last > self._price_publish_threshold:
+                self._last_published_price[coin] = price
+                self.event_bus.publish(
+                    PriceUpdateEvent(symbol=coin, timestamp_ms=now, price=price, source="mid")
+                )
 
     def _handle_l2_book(self, msg: dict) -> None:
         book = self._parser.parse_l2_book(msg)
