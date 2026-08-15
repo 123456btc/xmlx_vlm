@@ -314,5 +314,6 @@ function setupEventListeners() {
             state.watchlistSortOption = e.target.value;
             elements.watchlistContainer.scrollTop = 0;
             updateWatchlist();
+        });
     }
 }
