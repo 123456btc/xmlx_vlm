@@ -145,6 +145,14 @@ parse_server_opts() {
             --chat|--no-chat)
                 shift
                 ;;
+            --strategy)
+                START_STRATEGY=true
+                shift
+                ;;
+            --no-strategy)
+                START_STRATEGY=false
+                shift
+                ;;
             *)
                 # Forward other flags (e.g. --enable-tool-logits-bias, etc.)
                 SERVER_OPTS+=("$1")
@@ -314,24 +322,26 @@ cmd_start() {
     fi
 
     # ── Start AI Strategy Engine ──
-    if is_running "$STRATEGY_PID_FILE"; then
-        echo "AI Strategy Engine already running (PID: $(cat "$STRATEGY_PID_FILE"))"
-    else
-        export XMLX_VLM_WATCHLIST="${WATCHLIST}"
-        export XMLX_VLM_WATCHLIST_SIZE="${WATCHLIST_SIZE}"
-        if [[ -n "${WATCHLIST}" ]]; then
-            echo "Starting AI Strategy Engine (Custom Watchlist Mode: ${WATCHLIST})..."
+    if [[ "$START_STRATEGY" != false ]]; then
+        if is_running "$STRATEGY_PID_FILE"; then
+            echo "AI Strategy Engine already running (PID: $(cat "$STRATEGY_PID_FILE"))"
         else
-            echo "Starting AI Strategy Engine (Top-${WATCHLIST_SIZE} Watchlist Dynamic Mode)..."
+            export XMLX_VLM_WATCHLIST="${WATCHLIST}"
+            export XMLX_VLM_WATCHLIST_SIZE="${WATCHLIST_SIZE}"
+            if [[ -n "${WATCHLIST}" ]]; then
+                echo "Starting AI Strategy Engine (Custom Watchlist Mode: ${WATCHLIST})..."
+            else
+                echo "Starting AI Strategy Engine (Top-${WATCHLIST_SIZE} Watchlist Dynamic Mode)..."
+            fi
+            # Start strategies CLI auto-start in the background
+            nohup "$VENV_PYTHON" -u -m xmlx_vlm.ai_trader.cli \
+                --server-url "http://localhost:${PORT}" \
+                --api-key "$API_KEY" \
+                --auto-start > "$STRATEGY_LOG" 2>&1 &
+            local strategy_pid=$!
+            echo "$strategy_pid" > "$STRATEGY_PID_FILE"
+            echo "AI Strategy Engine ready (PID: ${strategy_pid})"
         fi
-        # Start strategies CLI auto-start in the background
-        nohup "$VENV_PYTHON" -u -m xmlx_vlm.ai_trader.cli \
-            --server-url "http://localhost:${PORT}" \
-            --api-key "$API_KEY" \
-            --auto-start > "$STRATEGY_LOG" 2>&1 &
-        local strategy_pid=$!
-        echo "$strategy_pid" > "$STRATEGY_PID_FILE"
-        echo "AI Strategy Engine ready (PID: ${strategy_pid})"
     fi
 }
 
