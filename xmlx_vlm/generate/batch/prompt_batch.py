@@ -39,7 +39,11 @@ from ..single import normalize_resize_shape, wired_limit
 
 logger = logging.getLogger('xmlx_vlm.generate')
 
-from .padding import _merge_prefill_prompt_kwargs
+from .padding import (
+    _merge_prefill_prompt_kwargs,
+    _left_pad_prompts,
+    _right_pad_prompts,
+)
 from .cache_helpers import _make_cache
 from .generation_batch import GenerationBatch
 

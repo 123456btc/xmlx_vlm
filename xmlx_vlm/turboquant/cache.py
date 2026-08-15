@@ -73,8 +73,19 @@ class _QuantizedStateProxy:
     def __getattr__(self, name):
         return getattr(self._state, name)
 
+    def __getitem__(self, item):
+        return self._state[item]
+
+    def __len__(self):
+        return len(self._state)
+
     def __iter__(self):
         return iter(self._state)
+
+    def __eq__(self, other):
+        if isinstance(other, _QuantizedStateProxy):
+            return self._state == other._state
+        return self._state == other
 
 
 class TurboQuantKVCache(_BaseCache):

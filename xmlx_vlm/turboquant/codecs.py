@@ -26,6 +26,7 @@ from .utils import (
     _packed_width,
     _pack_lowbit,
     _unpack_lowbit,
+    _rht_padded_dim,
     _rht_sign_vector,
     _rht_forward,
     _rht_inverse,

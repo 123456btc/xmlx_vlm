@@ -46,7 +46,7 @@ def patch_qwen35_attention_for_batching() -> bool:
             Qwen3_5Attention,
             apply_multimodal_rotary_pos_emb,
         )
-        from mlx_lm.models.base import scaled_dot_product_attention
+        from xmlx_vlm.models.base import scaled_dot_product_attention
     except ImportError:
         logger.debug("[Qwen3.5 patch] xmlx-vlm Qwen3.5 module not available")
         return False

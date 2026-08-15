@@ -111,7 +111,9 @@ def _fused_kv_quantize_kernel(key_bits: int, val_bits: int):
         float sq = v * v;
         float sg_sum = simd_sum(sq);
         threadgroup float sg_norms[8];
-        if (sg_lid == 0) sg_norms[sg_id] = sg_sum;
+        if (d < 8) sg_norms[d] = 0.0f;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        if (sg_lid == 0 && sg_id < 8) sg_norms[sg_id] = sg_sum;
         threadgroup_barrier(mem_flags::mem_threadgroup);
         float total_sq = (sg_id == 0 && sg_lid < 8) ? sg_norms[sg_lid] : 0.0f;
         total_sq = simd_sum(total_sq);
@@ -297,7 +299,9 @@ def _fused_mse_quantize_kernel(bits: int, use_rht: bool = False):
         float sg_sum = simd_sum(sq);
 
         threadgroup float sg_norms[8];
-        if (sg_lid == 0) sg_norms[sg_id] = sg_sum;
+        if (d < 8) sg_norms[d] = 0.0f;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        if (sg_lid == 0 && sg_id < 8) sg_norms[sg_id] = sg_sum;
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         float total_sq = (sg_id == 0 && sg_lid < 8) ? sg_norms[sg_lid] : 0.0f;
@@ -321,9 +325,10 @@ def _fused_mse_quantize_kernel(bits: int, use_rht: bool = False):
         for (int stride = 1; stride < DimPadded; stride *= 2) {{
             if (d < DimPadded) {{
                 int pair = d ^ stride;
-                float a = shared[min(d, pair)];
-                float b = shared[max(d, pair)];
-                temp[0] = (d < pair) ? (a + b) : (a - b);
+                uint upair = static_cast<uint>(pair);
+                float a = shared[min(d, upair)];
+                float b = shared[max(d, upair)];
+                temp[0] = (d < upair) ? (a + b) : (a - b);
             }}
             threadgroup_barrier(mem_flags::mem_threadgroup);
             if (d < DimPadded) shared[d] = temp[0];
@@ -380,7 +385,9 @@ def _fused_mse_quantize_kernel(bits: int, use_rht: bool = False):
         float sg_sum = simd_sum(sq);
 
         threadgroup float sg_norms[8];
-        if (sg_lid == 0) sg_norms[sg_id] = sg_sum;
+        if (d < 8) sg_norms[d] = 0.0f;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        if (sg_lid == 0 && sg_id < 8) sg_norms[sg_id] = sg_sum;
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         float total_sq = (sg_id == 0 && sg_lid < 8) ? sg_norms[sg_lid] : 0.0f;
@@ -439,7 +446,7 @@ def _fused_mse_quantize_kernel(bits: int, use_rht: bool = False):
     return mx.fast.metal_kernel(
         name=name,
         input_names=["vectors", "rotation", "midpoints"],
-        output_names=["out_packed", "out_norms"],
+        output_names=["out_norms", "out_packed"],
         source=source,
     )
 
