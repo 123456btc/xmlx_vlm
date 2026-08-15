@@ -106,16 +106,28 @@ parse_server_opts() {
     SERVER_OPTS=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --model|-m)
+                MODEL="$2"
+                shift 2
+                ;;
+            --port|-p)
+                PORT="$2"
+                shift 2
+                ;;
+            --api-key)
+                API_KEY="$2"
+                shift 2
+                ;;
             --draft-model)
-                SERVER_OPTS+=("--draft-model" "$2")
+                DRAFT_MODEL="$2"
                 shift 2
                 ;;
             --draft-kind)
-                SERVER_OPTS+=("--draft-kind" "$2")
+                DRAFT_KIND="$2"
                 shift 2
                 ;;
             --kv-bits)
-                SERVER_OPTS+=("--kv-bits" "$2")
+                KV_BITS="$2"
                 shift 2
                 ;;
             --kv-bits-per-layer)
@@ -123,18 +135,19 @@ parse_server_opts() {
                 shift 2
                 ;;
             --kv-quant-scheme)
-                SERVER_OPTS+=("--kv-quant-scheme" "$2")
+                KV_QUANT_SCHEME="$2"
                 shift 2
                 ;;
             --max-num-seqs)
                 SERVER_OPTS+=("--max-num-seqs" "$2")
                 shift 2
                 ;;
-            --chat)
+            --chat|--no-chat)
                 shift
                 ;;
             *)
-                # Unknown arg — could be extra env args, ignore for now
+                # Forward other flags (e.g. --enable-tool-logits-bias, etc.)
+                SERVER_OPTS+=("$1")
                 shift
                 ;;
         esac
