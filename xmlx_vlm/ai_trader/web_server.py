@@ -1247,7 +1247,7 @@ def serve_index():
     index_file = STATIC_DIR / "index.html"
     if not index_file.exists():
         return {"status": "error", "message": "Static assets folder 'web/static' is missing. Please create index.html"}
-    return FileResponse(index_file)
+    return FileResponse(index_file, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 # Mount remaining files (CSS, JS) statically
 try:

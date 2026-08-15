@@ -295,6 +295,7 @@ cmd_start() {
                 --port "$CHAT_PORT"
             )
             [[ -n "$API_KEY" ]] && chat_args+=(--api-key "$API_KEY")
+            [[ -n "$MODEL" ]] && chat_args+=(--model "$MODEL")
 
             # Clean stale port
             kill_port "$CHAT_PORT" 2>/dev/null || true
