@@ -248,6 +248,9 @@ pip install -e .
 # 覆盖默认 API key + KV 量化，用于生产负载
 XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
 
+# 启用分层差异化 KV 量化（前序关键层高精度，其余层低比特）与并发限制
+./service.sh start --kv-bits-per-layer "0:8,1:8,-1:8,default:3.5" --max-num-seqs 16
+
 # 启用 tool-call 加速，用于 MCP 密集型工作流
 ./service.sh start --enable-tool-logits-bias
 

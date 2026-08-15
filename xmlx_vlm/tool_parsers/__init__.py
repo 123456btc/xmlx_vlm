@@ -12,6 +12,10 @@ from mlx_lm.tokenizer_utils import _infer_tool_parser as _mlx_lm_infer_tool_pars
 # Additional patterns not covered by mlx_lm
 _EXTRA_PATTERNS = [
     ("<|tool_call>", "gemma4"),
+    ("<atem", "atem"),
+    ("<atem:call", "atem"),
+    ("atem_tool_call", "atem"),
+    ("atem", "atem"),
 ]
 
 
@@ -54,6 +58,7 @@ from .abstract_tool_parser import (
     ToolParser,
     ToolParserManager,
 )
+from .atem_tool_parser import AtemToolParser
 from .auto_tool_parser import AutoToolParser
 from .deepseek_tool_parser import DeepSeekToolParser
 from .functionary_tool_parser import FunctionaryToolParser

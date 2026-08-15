@@ -246,6 +246,9 @@ pip install -e .
 # Override default API key + KV quantization for production workloads
 XMLX_VLM_API_KEY=mykey ./service.sh start --kv-bits 3.5 --kv-quant-scheme turboquant
 
+# Enable per-layer mixed KV quantization and sequence concurrency bounding
+./service.sh start --kv-bits-per-layer "0:8,1:8,-1:8,default:3.5" --max-num-seqs 16
+
 # Enable tool-call acceleration for MCP-heavy workflows
 ./service.sh start --enable-tool-logits-bias
 

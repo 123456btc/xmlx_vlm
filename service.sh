@@ -118,8 +118,16 @@ parse_server_opts() {
                 SERVER_OPTS+=("--kv-bits" "$2")
                 shift 2
                 ;;
+            --kv-bits-per-layer)
+                SERVER_OPTS+=("--kv-bits-per-layer" "$2")
+                shift 2
+                ;;
             --kv-quant-scheme)
                 SERVER_OPTS+=("--kv-quant-scheme" "$2")
+                shift 2
+                ;;
+            --max-num-seqs)
+                SERVER_OPTS+=("--max-num-seqs" "$2")
                 shift 2
                 ;;
             --chat)

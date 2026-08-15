@@ -27,12 +27,18 @@ _TOOL_CALL_START_MARKERS = [
     " Calling tool:",
     "<invoke>",
     "<minimax:tool_call>",
+    "<atem:call",
+    "<atem_tool_call>",
+    "<atem>",
+    "<|channel|>call:",
+    "<|channel|>action:",
 ]
 
 # Patterns that suggest a tool call was intended but garbled
 _TOOL_CALL_SIGNALS = re.compile(
     r"(<tool_call>|<function=|\[TOOL_CALLS\]|\[Calling tool:|Calling tool:|"
-    r"<invoke>|<minimax:tool_call>)",
+    r"<invoke>|<minimax:tool_call>|<atem:call|<atem_tool_call>|<atem>|"
+    r"<\|channel\|>call:|<\|channel\|>action:)",
     re.IGNORECASE,
 )
 
@@ -47,15 +53,54 @@ def _repair_xml_tags(text: str) -> str:
             text = text + "</function>"
     if "<invoke>" in text and "</invoke>" not in text:
         text = text + "</invoke>"
+    if "<minimax:tool_call>" in text and "</minimax:tool_call>" not in text:
+        text = text + "</minimax:tool_call>"
+    if "<atem:call" in text and "</atem:call>" not in text:
+        text = text + "</atem:call>"
+    if "<atem_tool_call>" in text and "</atem_tool_call>" not in text:
+        text = text + "</atem_tool_call>"
+    if "<atem>" in text and "</atem>" not in text:
+        text = text + "</atem>"
     return text
+
+
+def _clean_json_str(s: str) -> str:
+    """Strip markdown code fence if present and normalize trailing commas."""
+    s = s.strip()
+    if s.startswith("```json"):
+        s = s[7:]
+    elif s.startswith("```"):
+        s = s[3:]
+    if s.endswith("```"):
+        s = s[:-3]
+    s = s.strip()
+    # Remove trailing commas before closing braces/brackets
+    s = re.sub(r",\s*([\]}])", r"\1", s)
+    return s
 
 
 def _extract_json_objects(text: str) -> list[dict[str, Any]]:
     """Extract balanced JSON objects from messy text, tolerant of truncation."""
     results: list[dict[str, Any]] = []
+    text = _clean_json_str(text)
     depth = 0
     start = None
+    in_string = False
+    escape = False
+
     for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
         if ch == "{":
             if depth == 0:
                 start = i
@@ -63,9 +108,21 @@ def _extract_json_objects(text: str) -> list[dict[str, Any]]:
         elif ch == "}":
             depth -= 1
             if depth == 0 and start is not None:
+                candidate = _clean_json_str(text[start : i + 1])
                 try:
-                    obj = json.loads(text[start : i + 1])
-                    if isinstance(obj, dict) and ("name" in obj or "type" in obj or "function" in obj):
+                    obj = json.loads(candidate)
+                    if isinstance(obj, dict) and any(
+                        k in obj
+                        for k in (
+                            "name",
+                            "type",
+                            "function",
+                            "tool",
+                            "action",
+                            "arguments",
+                            "parameters",
+                        )
+                    ):
                         results.append(obj)
                 except json.JSONDecodeError:
                     pass
@@ -77,11 +134,12 @@ def _extract_json_objects(text: str) -> list[dict[str, Any]]:
 
 
 def _repair_truncated_json(text: str) -> str:
-    """Heuristically close a truncated JSON object."""
-    depth = 0
-    last_valid = 0
+    """Heuristically close a truncated JSON object, handling unclosed strings & brackets."""
+    text = _clean_json_str(text)
+    brace_stack = []
     in_string = False
     escape = False
+
     for i, ch in enumerate(text):
         if escape:
             escape = False
@@ -89,57 +147,70 @@ def _repair_truncated_json(text: str) -> str:
         if ch == "\\":
             escape = True
             continue
-        if ch == '"' and not in_string:
-            in_string = True
-            last_valid = i
-            continue
-        if ch == '"' and in_string:
-            in_string = False
-            last_valid = i
+        if ch == '"':
+            in_string = not in_string
             continue
         if in_string:
             continue
+
         if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                last_valid = i
-    if depth > 0 and last_valid > 0:
-        # Append closing braces to balance
-        text = text + ("}" * depth)
-    return text
+            brace_stack.append("}")
+        elif ch == "[":
+            brace_stack.append("]")
+        elif ch in ("}", "]"):
+            if brace_stack and brace_stack[-1] == ch:
+                brace_stack.pop()
+
+    repaired = text
+    if in_string:
+        repaired += '"'
+
+    repaired = _clean_json_str(repaired)
+
+    while brace_stack:
+        closer = brace_stack.pop()
+        repaired += closer
+
+    return repaired
 
 
 def _extract_from_repaired_xml(text: str) -> list[dict[str, Any]] | None:
     """Repair XML tags then look for JSON objects inside them."""
     repaired = _repair_xml_tags(text)
-    # Look inside <tool_call>...</tool_call>
-    matches = re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", repaired, re.DOTALL)
     results: list[dict[str, Any]] = []
-    for m in matches:
-        m = m.strip()
-        if not m:
-            continue
-        try:
-            obj = json.loads(m)
-            if isinstance(obj, dict):
-                results.append(obj)
-        except json.JSONDecodeError:
-            # Try truncated-json repair
-            fixed = _repair_truncated_json(m)
+
+    # Look inside <tool_call>...</tool_call>
+    patterns = [
+        r"<tool_call>\s*(.*?)\s*</tool_call>",
+        r"<atem(?:_tool)?_call>\s*(.*?)\s*</atem(?:_tool)?_call>",
+        r"<minimax:tool_call>\s*(.*?)\s*</minimax:tool_call>",
+        r"<invoke>\s*(.*?)\s*</invoke>",
+    ]
+    for pat in patterns:
+        matches = re.findall(pat, repaired, re.DOTALL | re.IGNORECASE)
+        for m in matches:
+            m = m.strip()
+            if not m:
+                continue
             try:
-                obj = json.loads(fixed)
+                obj = json.loads(_clean_json_str(m))
                 if isinstance(obj, dict):
                     results.append(obj)
             except json.JSONDecodeError:
-                pass
+                fixed = _repair_truncated_json(m)
+                try:
+                    obj = json.loads(_clean_json_str(fixed))
+                    if isinstance(obj, dict):
+                        results.append(obj)
+                except json.JSONDecodeError:
+                    pass
+
     return results if results else None
 
 
 def _extract_bare_json(text: str) -> list[dict[str, Any]] | None:
     """Try to find raw JSON objects or arrays in the text."""
-    text = text.strip()
+    text = _clean_json_str(text)
     # Try array first
     if text.startswith("["):
         try:
@@ -147,11 +218,19 @@ def _extract_bare_json(text: str) -> list[dict[str, Any]] | None:
             if isinstance(parsed, list):
                 return [item for item in parsed if isinstance(item, dict)]
         except json.JSONDecodeError:
-            pass
+            fixed_arr = _repair_truncated_json(text)
+            try:
+                parsed = json.loads(fixed_arr)
+                if isinstance(parsed, list):
+                    return [item for item in parsed if isinstance(item, dict)]
+            except json.JSONDecodeError:
+                pass
+
     # Try individual objects
     objs = _extract_json_objects(text)
     if objs:
         return objs
+
     # Try truncated-json repair on the whole text
     fixed = _repair_truncated_json(text)
     objs = _extract_json_objects(fixed)
@@ -186,3 +265,8 @@ def attempt_recovery(text: str) -> list[dict[str, Any]] | None:
         return result
 
     return None
+
+
+def auto_recover_tool_calls(text: str) -> list[dict[str, Any]] | None:
+    """Alias for attempt_recovery."""
+    return attempt_recovery(text)

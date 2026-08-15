@@ -31,6 +31,8 @@ from ..config import (
     DEFAULT_QUANTIZED_KV_START,
     get_first_token_timeout,
     get_idle_kv_release_timeout,
+    get_kv_bits_per_layer,
+    get_max_num_seqs,
     get_server_max_queue_depth,
     get_token_queue_timeout,
 )
@@ -170,9 +172,11 @@ class ResponseGenerator:
         self._idle_kv_released: bool = False
         from ..config import get_serialize_requests
         self.serialize_requests = get_serialize_requests()
+        self.max_num_seqs = get_max_num_seqs()
         logger.info(
-            "ResponseGenerator initialized (serialize_requests=%s, idle_kv_release_timeout=%s)",
+            "ResponseGenerator initialized (serialize_requests=%s, max_num_seqs=%s, idle_kv_release_timeout=%s)",
             self.serialize_requests,
+            self.max_num_seqs,
             self._idle_kv_release_timeout,
         )
         self.prompt_cache_states: dict = {}
@@ -475,16 +479,19 @@ class ResponseGenerator:
                 # blocking wait when idle so we don't spin.
                 new_items = []
                 if active:
-                    if not self.serialize_requests:
-                        try:
-                            item = self.requests.get_nowait()
-                            if item is None:
-                                if self._stop:
-                                    break
-                            else:
-                                new_items.append(item)
-                        except QueueEmpty:
-                            pass
+                    # Enforce max_num_seqs: only pull new requests if slots are available
+                    available_slots = 0 if self.serialize_requests else max(0, self.max_num_seqs - len(active))
+                    if available_slots > 0:
+                        while len(new_items) < available_slots:
+                            try:
+                                item = self.requests.get_nowait()
+                                if item is None:
+                                    if self._stop:
+                                        break
+                                else:
+                                    new_items.append(item)
+                            except QueueEmpty:
+                                break
                 else:
                     try:
                         item = self.requests.get(timeout=0.1)
@@ -504,14 +511,16 @@ class ResponseGenerator:
                             self._release_idle_kv(batch_gen)
                             batch_gen = None
 
-                if not self.serialize_requests:
-                    while True:
-                        try:
-                            item = self.requests.get_nowait()
-                            if item is not None:
-                                new_items.append(item)
-                        except QueueEmpty:
-                            break
+                    if not self.serialize_requests and new_items:
+                        available_slots = max(0, self.max_num_seqs - len(active) - len(new_items))
+                        while available_slots > 0:
+                            try:
+                                item = self.requests.get_nowait()
+                                if item is not None:
+                                    new_items.append(item)
+                                    available_slots -= 1
+                            except QueueEmpty:
+                                break
 
                 # Drop abandoned requests before doing more work.
                 cancelled = self._drain_cancellations()
@@ -532,12 +541,20 @@ class ResponseGenerator:
                         continue
                     rqueue, raw_inputs, prompt_tokens, args, images = item
                     if batch_gen is None:
+                        num_l = (
+                            len(self.model.language_model.layers)
+                            if hasattr(self.model.language_model, "layers")
+                            else (len(self.model.layers) if hasattr(self.model, "layers") else 1)
+                        )
+                        kv_bits_layer = get_kv_bits_per_layer(num_l, self.kv_bits)
                         batch_gen = BatchGenerator(
                             self.model.language_model,
                             self.processor,
                             stop_tokens=self.stop_tokens,
                             sampler=self._make_sampler(args),
+                            completion_batch_size=self.max_num_seqs,
                             kv_bits=self.kv_bits,
+                            kv_bits_per_layer=kv_bits_layer,
                             kv_group_size=self.kv_group_size,
                             kv_quant_scheme=self.kv_quant_scheme,
                             quantized_kv_start=self.quantized_kv_start,

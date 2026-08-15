@@ -93,20 +93,50 @@ def maybe_quantize_kv_cache(
     kv_group_size,
     kv_bits,
     kv_quant_scheme: str = DEFAULT_KV_QUANT_SCHEME,
+    kv_bits_per_layer=None,
 ):
-    if kv_bits is None:
+    if kv_bits is None and kv_bits_per_layer is None and not os.environ.get("XMLX_VLM_KV_BITS_PER_LAYER"):
         return
 
-    if turboquant_enabled(kv_bits, kv_quant_scheme):
+    from ...config import get_kv_bits_per_layer
 
-        def quantize_entry(entry, layer_bits):
-            if isinstance(entry, TurboQuantKVCache):
-                return entry
-            if isinstance(entry, cache.RotatingKVCache):
-                return entry
+    num_layers = len(prompt_cache)
+    explicit_per_layer = bool(kv_bits_per_layer is not None or os.environ.get("XMLX_VLM_KV_BITS_PER_LAYER"))
+    last_idx = len(prompt_cache) - 1 if len(prompt_cache) > 2 else -1
+
+    if explicit_per_layer:
+        if isinstance(kv_bits_per_layer, str):
+            bits_per_layer = get_kv_bits_per_layer(num_layers, kv_bits, raw_config=kv_bits_per_layer)
+        elif isinstance(kv_bits_per_layer, (list, tuple)):
+            bits_per_layer = list(kv_bits_per_layer)
+            if len(bits_per_layer) < num_layers:
+                pad_val = kv_bits if kv_bits is not None else bits_per_layer[-1]
+                bits_per_layer = bits_per_layer + [pad_val] * (num_layers - len(bits_per_layer))
+            elif len(bits_per_layer) > num_layers:
+                bits_per_layer = bits_per_layer[:num_layers]
+        else:
+            bits_per_layer = get_kv_bits_per_layer(num_layers, kv_bits)
+    else:
+        if turboquant_enabled(kv_bits, kv_quant_scheme):
+            num_quant_layers = len(prompt_cache) - 1 if last_idx != -1 else len(prompt_cache)
+            adaptive_bits = _get_adaptive_bits_list(num_quant_layers, kv_bits)
+            bits_per_layer = list(adaptive_bits)
+            if last_idx != -1:
+                bits_per_layer.append(None)
+        else:
+            bits_per_layer = [kv_bits] * num_layers
+
+    if bits_per_layer is None:
+        return
+
+    def quantize_entry(entry, layer_bits):
+        if layer_bits is None:
+            return entry
+        if isinstance(entry, (TurboQuantKVCache, cache.RotatingKVCache, cache.QuantizedKVCache)):
+            return entry
+        if turboquant_enabled(layer_bits, kv_quant_scheme):
             if isinstance(entry, cache.KVCache):
                 if entry.offset == 0:
-                    # Empty: replace so update_and_fetch quantizes on the fly
                     return TurboQuantKVCache(bits=layer_bits)
                 if entry.offset < quantized_kv_start:
                     return entry
@@ -121,28 +151,20 @@ def maybe_quantize_kv_cache(
             if isinstance(entry, tuple):
                 return tuple(quantize_entry(sub_entry, layer_bits) for sub_entry in entry)
             return entry
+        else:
+            if isinstance(entry, cache.KVCache):
+                if entry.offset < quantized_kv_start:
+                    return entry
+                return cache.QuantizedKVCache.from_cache(
+                    entry, group_size=kv_group_size, bits=int(layer_bits)
+                )
+            return entry
 
-        # Skip the last layer (before final norm/LM head) — it's highly
-        # sensitive to quantization in deep models (e.g. gemma-4-31b).
-        last_idx = len(prompt_cache) - 1 if len(prompt_cache) > 2 else -1
-        num_quant_layers = len(prompt_cache) - 1 if last_idx != -1 else len(prompt_cache)
-        adaptive_bits = _get_adaptive_bits_list(num_quant_layers, kv_bits)
-        
-        quant_idx = 0
-        for index, layer_cache in enumerate(prompt_cache):
-            if index == last_idx:
-                continue
-            layer_bits = adaptive_bits[quant_idx]
-            prompt_cache[index] = quantize_entry(layer_cache, layer_bits)
-            quant_idx += 1
-        return
-
-    mlx_maybe_quantize_kv_cache(
-        prompt_cache,
-        quantized_kv_start=quantized_kv_start,
-        kv_group_size=kv_group_size,
-        kv_bits=int(kv_bits),
-    )
+    for index, layer_cache in enumerate(prompt_cache):
+        if not explicit_per_layer and index == last_idx and len(prompt_cache) > 2:
+            continue
+        layer_bits = bits_per_layer[index] if index < len(bits_per_layer) else kv_bits
+        prompt_cache[index] = quantize_entry(layer_cache, layer_bits)
 
 @contextlib.contextmanager
 def wired_limit(model: nn.Module, streams: Optional[List[mx.Stream]] = None):

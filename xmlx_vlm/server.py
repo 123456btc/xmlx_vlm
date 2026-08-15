@@ -27,6 +27,7 @@ from .config import (
     DEFAULT_IDLE_KV_RELEASE_TIMEOUT,
     DEFAULT_KV_GROUP_SIZE,
     DEFAULT_KV_QUANT_SCHEME,
+    DEFAULT_MAX_NUM_SEQS,
     DEFAULT_MAX_QUEUE_DEPTH,
     DEFAULT_PREFILL_STEP_SIZE,
     DEFAULT_QUANTIZED_KV_START,
@@ -116,6 +117,16 @@ def main():
         help="Number of bits for KV cache quantization (e.g. 3.5 for TurboQuant).",
     )
     parser.add_argument(
+        "--kv-bits-per-layer",
+        type=str,
+        default=None,
+        help=(
+            "Fine-grained per-layer KV quantization configuration. "
+            "Formats: 'adaptive', comma-separated ('8,8,4,4,3.5...'), or "
+            "key-value map ('0:8,1:8,-1:8,default:4', '0-3:8,default:4')."
+        ),
+    )
+    parser.add_argument(
         "--kv-quant-scheme",
         type=str,
         choices=("uniform", "turboquant"),
@@ -127,6 +138,16 @@ def main():
         type=int,
         default=DEFAULT_KV_GROUP_SIZE,
         help="Group size for uniform KV cache quantization.",
+    )
+    parser.add_argument(
+        "--max-num-seqs",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Maximum number of concurrent generating sequences in continuous batching. "
+            f"Default: {DEFAULT_MAX_NUM_SEQS}. Also overridable via XMLX_VLM_MAX_NUM_SEQS."
+        ),
     )
     parser.add_argument(
         "--max-kv-size",
@@ -282,8 +303,12 @@ def main():
         os.environ["XMLX_DEFAULT_THINKING_BUDGET"] = str(args.default_thinking_budget)
     if args.kv_bits is not None:
         os.environ["KV_BITS"] = str(args.kv_bits)
+    if args.kv_bits_per_layer is not None:
+        os.environ["XMLX_VLM_KV_BITS_PER_LAYER"] = str(args.kv_bits_per_layer)
     os.environ["KV_GROUP_SIZE"] = str(args.kv_group_size)
     os.environ["KV_QUANT_SCHEME"] = args.kv_quant_scheme
+    if args.max_num_seqs is not None:
+        os.environ["XMLX_VLM_MAX_NUM_SEQS"] = str(args.max_num_seqs)
     if args.max_kv_size is not None:
         os.environ["MAX_KV_SIZE"] = str(args.max_kv_size)
     if args.idle_kv_release_timeout is not None:

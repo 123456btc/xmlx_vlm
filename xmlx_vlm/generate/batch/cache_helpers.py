@@ -55,40 +55,63 @@ def _make_cache(
     kv_bits=None,
     kv_group_size=64,
     kv_quant_scheme=DEFAULT_KV_QUANT_SCHEME,
+    kv_bits_per_layer=None,
 ):
     """
     Convert a list of regular caches into their corresponding
     batch-aware caches.
 
-    When *kv_bits* is set, a quantized batch cache is used instead of
-    ``BatchKVCache`` so that KV states are quantized on-the-fly during
+    When *kv_bits* or *kv_bits_per_layer* is set, a quantized batch cache is used
+    instead of ``BatchKVCache`` so that KV states are quantized on-the-fly during
     generation, reducing memory usage for long sequences.
 
     *kv_quant_scheme* selects the quantization backend:
     - ``"uniform"`` → ``BatchQuantizedKVCache`` (``mx.quantize``)
     - ``"turboquant"`` or fractional *kv_bits* → ``BatchTurboQuantKVCache``
     """
-    use_turbo = kv_bits is not None and turboquant_enabled(kv_bits, kv_quant_scheme)
+    if hasattr(model, "make_cache"):
+        model_cache = model.make_cache()
+        num_layers = len(model_cache)
+    elif hasattr(model, "layers"):
+        model_cache = None
+        num_layers = len(model.layers)
+    else:
+        model_cache = None
+        num_layers = 1
 
-    def _make_quant_cache(lp):
+    from ...config import get_kv_bits_per_layer
+
+    bits_per_layer = None
+    if kv_bits_per_layer is not None:
+        if isinstance(kv_bits_per_layer, str):
+            bits_per_layer = get_kv_bits_per_layer(num_layers, kv_bits, raw_config=kv_bits_per_layer)
+        elif isinstance(kv_bits_per_layer, (list, tuple)):
+            bits_per_layer = list(kv_bits_per_layer)
+            if len(bits_per_layer) < num_layers:
+                pad_val = kv_bits if kv_bits is not None else bits_per_layer[-1]
+                bits_per_layer = bits_per_layer + [pad_val] * (num_layers - len(bits_per_layer))
+            elif len(bits_per_layer) > num_layers:
+                bits_per_layer = bits_per_layer[:num_layers]
+    elif kv_bits is not None:
+        bits_per_layer = get_kv_bits_per_layer(num_layers, kv_bits)
+        if bits_per_layer is None:
+            bits_per_layer = [kv_bits] * num_layers
+
+    def _make_quant_cache(lp, layer_bits):
+        if layer_bits is None:
+            return cache.BatchKVCache(lp)
+        use_turbo = turboquant_enabled(layer_bits, kv_quant_scheme)
         if use_turbo:
-            return BatchTurboQuantKVCache(lp, bits=kv_bits)
+            return BatchTurboQuantKVCache(lp, bits=layer_bits)
         return cache.BatchQuantizedKVCache(
-            lp, group_size=kv_group_size, bits=int(kv_bits)
+            lp, group_size=kv_group_size, bits=int(layer_bits)
         )
 
-    def to_batch_cache(c, quantize=True):
-        if isinstance(c, cache.KVCache):
-            if kv_bits is not None and quantize:
-                return _make_quant_cache(left_padding)
-            return cache.BatchKVCache(left_padding)
-        elif isinstance(c, cache.ChunkedKVCache):
-            if kv_bits is not None and quantize:
-                return _make_quant_cache(left_padding)
-            return cache.BatchKVCache(left_padding)
-        elif isinstance(c, cache.SimpleKVCache):
-            if kv_bits is not None and quantize:
-                return _make_quant_cache(left_padding)
+    def to_batch_cache(c, layer_idx=0, quantize=True):
+        layer_bits = bits_per_layer[layer_idx] if (bits_per_layer and layer_idx < len(bits_per_layer)) else kv_bits
+        if isinstance(c, (cache.KVCache, cache.ChunkedKVCache, cache.SimpleKVCache)):
+            if layer_bits is not None and quantize:
+                return _make_quant_cache(left_padding, layer_bits)
             return cache.BatchKVCache(left_padding)
         elif isinstance(c, cache.ArraysCache):
             c.left_padding = mx.array(left_padding)
@@ -98,27 +121,27 @@ def _make_cache(
                 raise ValueError("RotatingKVCache with keep tokens is not supported.")
             return cache.BatchRotatingKVCache(c.max_size, left_padding)
         elif isinstance(c, cache.CacheList):
-            return cache.CacheList(*(to_batch_cache(sub_c) for sub_c in c.caches))
+            return cache.CacheList(*(to_batch_cache(sub_c, layer_idx, quantize) for sub_c in c.caches))
         elif isinstance(c, tuple):
-            return cache.CacheList(*(to_batch_cache(sub_c) for sub_c in c))
+            return cache.CacheList(*(to_batch_cache(sub_c, layer_idx, quantize) for sub_c in c))
         else:
             raise ValueError(f"{type(c)} does not yet support batching")
 
-    if hasattr(model, "make_cache"):
-        model_cache = model.make_cache()
+    explicit_per_layer = bool(kv_bits_per_layer is not None or os.environ.get("XMLX_VLM_KV_BITS_PER_LAYER"))
+
+    if model_cache is not None:
         n = len(model_cache)
-        # Skip quantizing the last layer — it's sensitive to quantization
         return [
-            to_batch_cache(c, quantize=(i < n - 1 if n > 2 else True))
+            to_batch_cache(c, layer_idx=i, quantize=(True if explicit_per_layer else (i < n - 1 if n > 2 else True)))
             for i, c in enumerate(model_cache)
         ]
     else:
-        if kv_bits is not None:
+        if bits_per_layer is not None:
             n = len(model.layers)
             return [
                 (
-                    _make_quant_cache(left_padding)
-                    if i < n - 1 or n <= 2
+                    _make_quant_cache(left_padding, bits_per_layer[i])
+                    if (explicit_per_layer or i < n - 1 or n <= 2)
                     else cache.BatchKVCache(left_padding)
                 )
                 for i in range(n)

@@ -67,6 +67,7 @@ class PromptProcessingBatch:
         kv_bits=None,
         kv_group_size: int = DEFAULT_KV_GROUP_SIZE,
         kv_quant_scheme: str = DEFAULT_KV_QUANT_SCHEME,
+        kv_bits_per_layer=None,
         warm_cache: Optional[List[Any]] = None,
         apc_meta: Optional[List[dict]] = None,
         apc_manager: Optional["_apc.APCManager"] = None,
@@ -138,6 +139,7 @@ class PromptProcessingBatch:
                 kv_bits=kv_bits,
                 kv_group_size=kv_group_size,
                 kv_quant_scheme=kv_quant_scheme,
+                kv_bits_per_layer=kv_bits_per_layer,
             )
 
         # Declare per-row right-padding on each cache so finalize() can roll
