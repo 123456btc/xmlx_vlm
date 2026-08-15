@@ -290,8 +290,16 @@ def discover_all_local_models() -> List[Dict[str, Any]]:
                             if parsed:
                                 discovered_map[repo_name] = parsed
 
-    # Return sorted by disk size (descending)
-    return sorted(discovered_map.values(), key=lambda x: x["disk_size_gb"], reverse=True)
+    # Sort with Qwen3.8-27B-4bit prioritized at top, then other models by disk size
+    def _sort_priority(m: Dict[str, Any]) -> Tuple[int, float]:
+        model_id = m["id"].lower()
+        if "qwen3.8" in model_id:
+            return (0, -m["disk_size_gb"])
+        if "qwen3.6" in model_id:
+            return (1, -m["disk_size_gb"])
+        return (2, -m["disk_size_gb"])
+
+    return sorted(discovered_map.values(), key=_sort_priority)
 
 
 def evaluate_memory_compatibility(needed_ram_gb: float, system_ram_gb: float) -> Tuple[bool, str, str]:
