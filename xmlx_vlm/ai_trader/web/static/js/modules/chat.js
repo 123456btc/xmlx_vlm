@@ -426,11 +426,17 @@ export function handleWsEvent(data) {
             hideTypingIndicator();
             if (currentAssistantBubble) {
                 const detailsEl = currentAssistantBubble.querySelector('.thinking-details');
-                if (detailsEl && detailsEl.hasAttribute('open')) {
-                    detailsEl.removeAttribute('open');
-                    const summarySpan = detailsEl.querySelector('.thinking-summary span');
-                    if (summarySpan) {
-                        summarySpan.textContent = 'Thinking Process';
+                if (detailsEl) {
+                    if (!currentAssistantContent && currentAssistantThinking) {
+                        // If model only generated thinking tokens, display it as main content
+                        currentAssistantBubble.querySelector('.message-content').innerHTML = marked.parse(currentAssistantThinking);
+                        detailsEl.remove();
+                    } else if (detailsEl.hasAttribute('open')) {
+                        detailsEl.removeAttribute('open');
+                        const summarySpan = detailsEl.querySelector('.thinking-summary span');
+                        if (summarySpan) {
+                            summarySpan.textContent = 'Thinking Process';
+                        }
                     }
                 }
             }

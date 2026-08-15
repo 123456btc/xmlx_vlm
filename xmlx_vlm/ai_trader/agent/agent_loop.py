@@ -389,11 +389,19 @@ class AITraderAgent:
                     
                     # Stream text from model
                     model_output = ""
+                    server_tool_calls = []
                     t0_llm = time.perf_counter()
                     if self.use_server:
                         async for chunk_type, chunk in self._stream_from_server(db_messages):
-                            model_output += chunk
-                            yield {"type": chunk_type, "content": chunk}
+                            if chunk_type == "tool_call":
+                                try:
+                                    tc_obj = json.loads(chunk)
+                                    server_tool_calls.append(tc_obj)
+                                except Exception:
+                                    pass
+                            else:
+                                model_output += chunk
+                                yield {"type": chunk_type, "content": chunk}
                     else:
                         async for chunk_type, chunk in self._stream_from_local(db_messages):
                             model_output += chunk
@@ -403,8 +411,8 @@ class AITraderAgent:
                     llm_duration = time.perf_counter() - t0_llm
                     tracer.log_step("llm_planning_stream", llm_duration, {"session_id": session_id})
                     
-                    # Check for tool calls
-                    tool_calls = parse_tool_calls(model_output)
+                    # Check for tool calls (either structured from server or parsed from raw text)
+                    tool_calls = server_tool_calls or parse_tool_calls(model_output)
                     if not tool_calls:
                         explanation = remove_tool_calls(model_output)
                         self.db.add_message(
@@ -415,14 +423,12 @@ class AITraderAgent:
                         )
                         current_state = AgentState.COMPLETED
                     else:
-                        explanation = remove_tool_calls(model_output)
-                        if explanation:
-                            self.db.add_message(
-                                message_id=str(uuid.uuid4()),
-                                session_id=session_id,
-                                role="assistant",
-                                content=explanation,
-                            )
+                        self.db.add_message(
+                            message_id=str(uuid.uuid4()),
+                            session_id=session_id,
+                            role="assistant",
+                            content=model_output,
+                        )
                         
                         # Separate sensitive calls from read-only calls
                         sensitive_calls = []
@@ -709,6 +715,21 @@ class AITraderAgent:
                             content = delta.get("content", "")
                             if content:
                                 yield "text", content
+                                
+                            tool_calls = delta.get("tool_calls")
+                            if tool_calls:
+                                for tc in tool_calls:
+                                    if isinstance(tc, dict):
+                                        fn = tc.get("function", {})
+                                        fn_name = fn.get("name") if isinstance(fn, dict) else tc.get("name")
+                                        fn_args = fn.get("arguments", {}) if isinstance(fn, dict) else tc.get("arguments", {})
+                                        if isinstance(fn_args, str):
+                                            try:
+                                                fn_args = json.loads(fn_args)
+                                            except Exception:
+                                                pass
+                                        if fn_name:
+                                            yield "tool_call", json.dumps({"name": fn_name, "arguments": fn_args, "id": tc.get("id")})
                         except Exception:
                             continue
         except Exception as e:
