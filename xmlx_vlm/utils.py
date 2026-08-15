@@ -44,6 +44,12 @@ MODEL_REMAPPING = {
     "rf-detr": "rfdetr",
     "falcon-perception": "falcon_perception",
     "nemotronh_nano_omni_reasoning_v3": "nemotron_h_nano_omni",
+    "qwen3_8": "qwen3_5",
+    "qwen3.8": "qwen3_5",
+    "qwen3_8_vl": "qwen3_5",
+    "qwen3.8_vl": "qwen3_5",
+    "qwen3_8_moe": "qwen3_5_moe",
+    "qwen3.8_moe": "qwen3_5_moe",
 }
 
 MAX_FILE_SIZE_GB = 5

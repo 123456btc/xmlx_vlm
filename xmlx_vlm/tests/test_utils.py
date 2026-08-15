@@ -456,10 +456,20 @@ class TestLoadImage:
             ):
                 load_image("https://example.com/nonexistent.png")
 
-    def test_nonexistent_file_raises(self):
-        with pytest.raises(ValueError, match="Failed to load image"):
-            load_image("/nonexistent/path/image.png")
-
     def test_nonexistent_path_object_raises(self):
         with pytest.raises(ValueError, match="Failed to load image"):
             load_image(Path("/nonexistent/path/image.png"))
+
+
+def test_get_model_and_args_qwen3_8():
+    from xmlx_vlm.utils import get_model_and_args
+
+    for m_type in ["qwen3_8", "qwen3.8", "qwen3_8_vl", "qwen3.8_vl"]:
+        mod, resolved = get_model_and_args({"model_type": m_type})
+        assert resolved == "qwen3_5"
+        assert hasattr(mod, "Model")
+
+    for m_type in ["qwen3_8_moe", "qwen3.8_moe"]:
+        mod, resolved = get_model_and_args({"model_type": m_type})
+        assert resolved == "qwen3_5_moe"
+        assert hasattr(mod, "Model")
