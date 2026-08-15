@@ -14,11 +14,30 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <a href="#"><img alt="Platform: macOS" src="https://img.shields.io/badge/平台-macOS%20(Apple%20Silicon%20M1--M5)-silver?logo=apple"></a>
   <a href="#"><img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python"></a>
+  <a href="#"><img alt="Hardware" src="https://img.shields.io/badge/引擎-MLX%20Native-orange"></a>
+  <a href="#"><img alt="Exchange" src="https://img.shields.io/badge/交易所-Hyperliquid%20Perp-teal"></a>
 </p>
 
 <p align="center">
   <a href="README.md">🇺🇸 English</a> | <strong>🇨🇳 中文</strong> | <a href="README.ja.md">🇯🇵 日本語</a> | <a href="README.ko.md">🇰🇷 한국어</a>
 </p>
+
+---
+
+## 📑 目录导航
+
+- [⚡ 为什么选择本地私有 AI 交易操作系统？](#-为什么选择本地私有-ai-交易操作系统)
+- [🚀 XMLX-VLM 的 5 大核心支柱](#-xmlx-vlm-的-5-大核心支柱)
+  - [1. 机构级内存列式行情基础设施](#1-机构级内存列式行情基础设施-hedge-fund-grade-columnar-engine)
+  - [2. 大模型提方案，本地 Runtime 强风控](#2-大模型提方案本地-runtime-强风控)
+  - [3. 四角色多智能体自主战队](#3-四角色多智能体自主战队)
+  - [4. Apple Silicon 原生 MLX 加速](#4-apple-silicon-原生-mlx-加速)
+  - [5. 原生现代化量化 Web 终端 & KMS 安全](#5-原生现代化量化-web-终端--kms-安全)
+- [⚡ 极速起步（30 秒）](#-极速起步30-秒)
+- [🧪 完整自动化测试套件](#-完整自动化测试套件)
+- [🧬 AFRE 量化因子研究基座](#-afre-量化因子研究基座)
+- [❓ 常见问题解答 (FAQ)](#-常见问题解答-faq)
+- [📄 开源许可证](#-开源许可证)
 
 ---
 
@@ -98,7 +117,7 @@
 - **Continuous Batching**：多智能体并发推理互不阻塞。
 - **分层 APC 前缀缓存**：系统提示词持久化至 SSD，毫秒级温启动。
 
-### 5. 原生现代化量化 Web 终端
+### 5. 原生现代化量化 Web 终端 & KMS 安全
 - 一键启动本地暗黑风格交易终端：`http://localhost:5119`。
 - **KMS 本地加密**：API 密钥经 AES-256-GCM 保护，永不上云。
 - **交互式审批门禁**：实盘下单支持手动一键核准，亦可切换全自动巡航。
@@ -149,6 +168,34 @@ PYTHONPATH=. pytest tests/test_agent_core.py \
 ## 🧬 AFRE 量化因子研究基座
 
 XMLX-VLM 同时作为 **AFRE (AI Factor Research Engine)** 因子谱系研究平台的私有化 AI 大脑，赋能因子溯源、假设检验与防过拟合治理。
+
+---
+
+## ❓ 常见问题解答 (FAQ)
+
+<details>
+<summary><strong>问：XMLX-VLM 如何做到 $0 Token 费用？</strong></summary>
+<br/>
+XMLX-VLM 直接通过 Apple MLX 在你的 Mac 统一内存中运行专用量化大模型（如 Qwen 3.8 TurboQuant）。由于完全不需要向第三方云端 API 发送请求，你可以 7x24 小时高频运行多智能体交易循环，而不会产生任何月费或 Token 账单。
+</details>
+
+<details>
+<summary><strong>问：支持哪些硬件设备？</strong></summary>
+<br/>
+支持所有搭载 Apple Silicon 芯片的 Mac 电脑（M1, M2, M3, M4, M5，包括 Base、Pro、Max 与 Ultra 版本），建议统一内存不低于 16GB（32GB+ 可获得最佳的多 Agent 并发推理体验）。
+</details>
+
+<details>
+<summary><strong>问：交易所 API Key 与私钥如何保证安全？</strong></summary>
+<br/>
+凭证完全保存在本地，绝不出网。系统使用本地主密钥通过 AES-256-GCM 算法对凭证数据库进行端到端加密保护。
+</details>
+
+<details>
+<summary><strong>问：什么是 Point-in-Time (`as_of`) 时间旅行？</strong></summary>
+<br/>
+在传统量化回测中，大模型经常会无意间读取到未来的行情数据（未来函数 / Lookahead Bias）。XMLX-VLM 的列式行情存储引擎严格在底层支持任意历史时间戳的快照回溯，确保回测环境与真实实盘完全一致。
+</details>
 
 ---
 
