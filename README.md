@@ -382,8 +382,8 @@ Pi is a local-first coding agent that pairs well with XMLX-VLM. Add the provider
       },
       "models": [
         {
-          "id": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
-          "name": "DiffusionGemma 26B A4B 4bit (XMLX-VLM local)",
+          "id": "mlx-community/Qwen3.8-27B-4bit",
+          "name": "Qwen 3.8 27B 4bit (XMLX-VLM local)",
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null,
@@ -394,7 +394,7 @@ Pi is a local-first coding agent that pairs well with XMLX-VLM. Add the provider
             "xhigh": "xhigh"
           },
           "input": ["text", "image"],
-          "contextWindow": 128000,
+          "contextWindow": 262144,
           "maxTokens": 32768,
           "cost": {
             "input": 0,
@@ -414,7 +414,7 @@ Then set as default in `~/.pi/agent/settings.json`:
 ```json
 {
   "defaultProvider": "xmlx-local",
-  "defaultModel": "mlx-community/diffusiongemma-26B-A4B-it-4bit"
+  "defaultModel": "mlx-community/Qwen3.8-27B-4bit"
 }
 ```
 

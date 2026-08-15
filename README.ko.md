@@ -379,8 +379,8 @@ Pi는 XMLX-VLM과 잘 어울리는 로컬 우선 코딩 에이전트입니다. `
       },
       "models": [
         {
-          "id": "mlx-community/diffusiongemma-26B-A4B-it-4bit",
-          "name": "DiffusionGemma 26B A4B 4bit (XMLX-VLM local)",
+          "id": "mlx-community/Qwen3.8-27B-4bit",
+          "name": "Qwen 3.8 27B 4bit (XMLX-VLM local)",
           "reasoning": true,
           "thinkingLevelMap": {
             "off": null,
@@ -391,7 +391,7 @@ Pi는 XMLX-VLM과 잘 어울리는 로컬 우선 코딩 에이전트입니다. `
             "xhigh": "xhigh"
           },
           "input": ["text", "image"],
-          "contextWindow": 128000,
+          "contextWindow": 262144,
           "maxTokens": 32768,
           "cost": {
             "input": 0,
@@ -411,7 +411,7 @@ Pi는 XMLX-VLM과 잘 어울리는 로컬 우선 코딩 에이전트입니다. `
 ```json
 {
   "defaultProvider": "xmlx-local",
-  "defaultModel": "mlx-community/diffusiongemma-26B-A4B-it-4bit"
+  "defaultModel": "mlx-community/Qwen3.8-27B-4bit"
 }
 ```
 
