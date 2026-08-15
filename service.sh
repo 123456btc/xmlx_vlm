@@ -29,7 +29,9 @@ VENV_PYTHON="${SCRIPT_DIR}/.venv/bin/python3"
 PID_DIR="${SCRIPT_DIR}/.pids"
 LOG_DIR="${SCRIPT_DIR}/.logs"
 
-MODEL="${XMLX_VLM_MODEL:-mlx-community/diffusiongemma-26B-A4B-it-4bit}"
+MODEL="${XMLX_VLM_MODEL:-mlx-community/Qwen3.8-27B-4bit}"
+DEFAULT_MODEL="mlx-community/Qwen3.8-27B-4bit"
+MODEL_SPECIFIED=false
 PORT="${XMLX_VLM_PORT:-5118}"
 CHAT_PORT="${XMLX_VLM_CHAT_PORT:-5119}"
 API_KEY="${XMLX_VLM_API_KEY:-x123456}"
@@ -99,6 +101,24 @@ kill_port() {
     fi
 }
 
+# ─── Model Selection ────────────────────────────────────────────────────────
+select_model_interactive() {
+    # If user explicitly passed --model or set XMLX_VLM_MODEL in env, skip prompt
+    if [[ "$MODEL_SPECIFIED" == "true" ]]; then
+        return 0
+    fi
+    # If running interactively attached to a TTY, prompt with the model catalog
+    if [[ -t 0 ]]; then
+        local chosen
+        chosen="$("$VENV_PYTHON" -m xmlx_vlm.model_selector --interactive "${MODEL:-$DEFAULT_MODEL}")"
+        if [[ -n "$chosen" ]]; then
+            MODEL="$chosen"
+        fi
+    else
+        MODEL="${MODEL:-$DEFAULT_MODEL}"
+    fi
+}
+
 # ─── Commands ───────────────────────────────────────────────────────────────
 
 # Parse extra server args (anything before --chat or non-recognized flags)
@@ -108,6 +128,7 @@ parse_server_opts() {
         case "$1" in
             --model|-m)
                 MODEL="$2"
+                MODEL_SPECIFIED=true
                 shift 2
                 ;;
             --port|-p)
@@ -217,6 +238,7 @@ cmd_start() {
     done
 
     parse_server_opts "$@"
+    select_model_interactive
     ensure_dirs
 
     # ── Ensure Model is Downloaded (Interactive Foreground Phase) ──
@@ -510,8 +532,11 @@ cmd="${1:-}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-    start)
+    ""|start)
         cmd_start "$@"
+        ;;
+    models|list-models|select-model)
+        "$VENV_PYTHON" -m xmlx_vlm.model_selector "$@"
         ;;
     pull)
         cmd_pull "$@"
@@ -536,7 +561,8 @@ case "$cmd" in
 XMLX VLM Service Manager
 
 Usage:
-  $(basename "$0") start [--no-chat] [SERVER_OPTS]      Start server with chat UI (default)
+  $(basename "$0") [start] [--no-chat] [SERVER_OPTS]   Start server with interactive model menu & chat UI
+  $(basename "$0") models                                List / select available models interactively
   $(basename "$0") pull [MODEL]                          Pre-download model weights interactively
   $(basename "$0") stop                                   Stop server and chat UI
   $(basename "$0") restart [--no-chat] [SERVER_OPTS]    Restart server
