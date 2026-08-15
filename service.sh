@@ -218,19 +218,22 @@ cmd_start() {
         local server_pid=$!
         echo "$server_pid" > "$SERVER_PID_FILE"
 
-        # Wait for health check
+        # Wait for health check (models may need time to download on first run)
+        local start_timeout="${XMLX_VLM_START_TIMEOUT:-600}"
         local waited=0
         while ! curl -sf "http://localhost:${PORT}/health" >/dev/null 2>&1; do
-            sleep 1
-            ((waited++))
-            if [[ $waited -ge 60 ]]; then
-                echo "ERROR: Server failed to start within 60s. Check ${SERVER_LOG}"
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+                echo "ERROR: Server process exited unexpectedly. Check ${SERVER_LOG}"
                 rm -f "$SERVER_PID_FILE"
                 return 1
             fi
-            # Check if process died
-            if ! kill -0 "$server_pid" 2>/dev/null; then
-                echo "ERROR: Server process exited unexpectedly. Check ${SERVER_LOG}"
+            sleep 2
+            ((waited+=2))
+            if (( waited % 20 == 0 )); then
+                echo "  Still initializing server / downloading weights (${waited}s / ${start_timeout}s)..."
+            fi
+            if [[ $waited -ge $start_timeout ]]; then
+                echo "ERROR: Server failed to start within ${start_timeout}s. Check ${SERVER_LOG}"
                 rm -f "$SERVER_PID_FILE"
                 return 1
             fi
