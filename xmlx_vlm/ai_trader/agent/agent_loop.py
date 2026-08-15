@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, AsyncGenerator
 from enum import Enum
 
 import requests
+import httpx
 from rich import print as rprint
 
 from xmlx_vlm import load
@@ -244,14 +245,12 @@ class AITraderAgent:
                     "max_tokens": 20,
                     "temperature": 0.1,
                 }
-                def call_server():
-                    return requests.post(
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+                    resp = await client.post(
                         f"{self.server_url}/v1/chat/completions",
                         json=payload,
                         headers=headers,
-                        timeout=10,
                     )
-                resp = await asyncio.to_thread(call_server)
                 if resp.status_code == 200:
                     data = resp.json()
                     title = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -667,7 +666,7 @@ class AITraderAgent:
                     logger.error("Failed to run title summarization: %s", e)
 
     async def _stream_from_server(self, db_messages: List[Dict[str, Any]]) -> AsyncGenerator[Tuple[str, str], None]:
-        """Call the FastAPI server completions endpoint and yield (type, token) tuples."""
+        """Call the FastAPI server completions endpoint asynchronously and yield (type, token) tuples."""
         messages = self._build_history_for_openai(db_messages)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -682,40 +681,36 @@ class AITraderAgent:
             "tools": self.registry.list_tools(),
         }
 
-        def post_stream():
-            return requests.post(
-                f"{self.server_url}/v1/chat/completions",
-                json=payload,
-                headers=headers,
-                stream=True,
-                timeout=600,
-            )
-
         try:
-            resp = await asyncio.to_thread(post_stream)
-            resp.raise_for_status()
-            
-            for line in resp.iter_lines():
-                if not line:
-                    continue
-                if not line.startswith(b"data: "):
-                    continue
-                data = line[6:].decode("utf-8")
-                if data == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    
-                    reasoning = delta.get("reasoning") or delta.get("reasoning_content") or ""
-                    if reasoning:
-                        yield "thinking", reasoning
-                    
-                    content = delta.get("content", "")
-                    if content:
-                        yield "text", content
-                except Exception:
-                    continue
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.server_url}/v1/chat/completions",
+                    json=payload,
+                    headers=headers,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[6:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            
+                            reasoning = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                            if reasoning:
+                                yield "thinking", reasoning
+                            
+                            content = delta.get("content", "")
+                            if content:
+                                yield "text", content
+                        except Exception:
+                            continue
         except Exception as e:
             logger.error("Error connecting to completions server: %s", e)
             yield "text", f"\n[连接服务器失败: {e}]"
