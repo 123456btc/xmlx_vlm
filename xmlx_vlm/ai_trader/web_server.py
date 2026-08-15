@@ -689,11 +689,11 @@ _global_oms_engine: Optional[OMSEngine] = None
 def _get_oms() -> OMSEngine:
     """Get the current OMS Engine, prioritizing Agent's tool, falling back to a global instance."""
     global _global_oms_engine
-    if agent:
+    if agent and agent.registry:
         try:
             trading_tool = agent.registry.get_tool("trading")
-            if trading_tool and trading_tool._oms:
-                return trading_tool._oms
+            if trading_tool and trading_tool.oms:
+                return trading_tool.oms
         except Exception:
             pass
             
@@ -1046,13 +1046,16 @@ async def get_portfolio():
 
 
 @app.post("/api/oms/emergency_stop")
-def trigger_emergency_stop():
+async def trigger_emergency_stop():
     """Trigger emergency liquidation / circuit breaker."""
     try:
-        trading_tool = agent.registry.get_tool("trading")
-        output = trading_tool.emergency_stop()
-        return {"status": "success", "message": output}
+        oms = _get_oms()
+        res = await oms.emergency_stop(flatten=True)
+        flatten_count = len(res.get("flatten_results", []))
+        msg = f"急停已触发，已执行全平操作（处理 {flatten_count} 个持仓标的）并锁定新开仓。"
+        return {"status": "success", "message": msg, "details": res}
     except Exception as e:
+        logger.exception("Emergency stop failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

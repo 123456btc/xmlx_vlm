@@ -196,12 +196,12 @@ class OMSEngine:
         oracle_price: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """提交订单：风控 → 执行 → 更新状态 → 审计."""
-        # 0. 全局锁定检查
-        if self.kill_switch.is_locked:
+        # 0. 全局锁定检查（仅针对新开仓；允许 reduce_only 减仓单执行以降低风险）
+        if self.kill_switch.is_locked and not order.reduce_only:
             raise CircuitTrippedError("kill_switch", self.kill_switch.reason)
 
         circuit_reason = self._check_circuits()
-        if circuit_reason:
+        if circuit_reason and not order.reduce_only:
             raise CircuitTrippedError("circuit", circuit_reason)
 
         # 1. 实盘保护：仅真实交易所（hyperliquid）需要显式启用 live
@@ -418,6 +418,46 @@ class OMSEngine:
 
     async def emergency_stop(self, flatten: bool = True) -> Dict[str, Any]:
         """触发急停，可选市价全平."""
+        results = []
+        if flatten:
+            try:
+                await self.sync()
+            except Exception as exc:
+                logger.warning("sync failed before emergency flatten: %s", exc)
+
+            # 市价平掉所有持仓（严格带有 reduce_only=True 保护）
+            for pos in self.portfolio.list_positions():
+                if pos.is_flat() or pos.qty <= ZERO:
+                    continue
+                close_side = "sell" if pos.is_long() else "buy"
+                
+                # 获取参考价格用于风控
+                mark_price = None
+                if self._market_data_provider:
+                    try:
+                        summary = self._market_data_provider.get_summary(pos.symbol)
+                        if summary:
+                            mark_price = summary.last_price
+                    except Exception:
+                        pass
+                if mark_price is None and pos.avg_entry_price > ZERO:
+                    mark_price = pos.avg_entry_price
+
+                order = self.create_order(
+                    symbol=pos.symbol,
+                    side=close_side,
+                    qty=pos.qty,
+                    order_type="market",
+                    price=mark_price,
+                    reduce_only=True,
+                )
+                try:
+                    result = await self.submit_order(order, mark_price=mark_price)
+                    results.append(result)
+                except Exception as exc:
+                    logger.error("flatten failed for %s: %s", pos.symbol, exc)
+                    results.append({"symbol": pos.symbol, "error": str(exc)})
+
         self.kill_switch.trigger(
             triggered_by="user",
             reason="emergency stop requested",
@@ -426,29 +466,10 @@ class OMSEngine:
         self._audit(
             AuditEventType.KILL_SWITCH,
             None,
-            payload={"flatten": flatten, "reason": "emergency stop"},
+            payload={"flatten": flatten, "reason": "emergency stop", "results": results},
         )
 
-        if flatten and self.settings.auto_flatten_on_kill:
-            # 市价平掉所有持仓（严格带有 reduce_only=True 保护）
-            results = []
-            for pos in self.portfolio.list_positions():
-                close_side = "sell" if pos.is_long() else "buy"
-                order = self.create_order(
-                    symbol=pos.symbol,
-                    side=close_side,
-                    qty=pos.qty,
-                    order_type="market",
-                    reduce_only=True,
-                )
-                try:
-                    result = await self.submit_order(order)
-                    results.append(result)
-                except Exception as exc:
-                    logger.error("flatten failed for %s: %s", pos.symbol, exc)
-                    results.append({"symbol": pos.symbol, "error": str(exc)})
-            return {"status": "killed", "flatten_results": results}
-        return {"status": "killed"}
+        return {"status": "killed", "flatten_results": results}
 
     async def close_position(self, symbol: str) -> Optional[Order]:
         """Close an active position for the given symbol, offsetting long/short directions with reduce_only=True."""
