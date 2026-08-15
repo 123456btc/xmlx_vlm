@@ -154,6 +154,46 @@ parse_server_opts() {
     done
 }
 
+ensure_model_downloaded() {
+    local target_model="$1"
+    if [[ -d "$target_model" || -f "$target_model" ]]; then
+        return 0
+    fi
+    echo "==> Verifying / downloading model weights for: ${target_model}..."
+    echo "    (If not locally cached, full interactive download progress will be shown below)"
+    "$VENV_PYTHON" -c "
+import sys
+from xmlx_vlm.utils import get_model_path
+try:
+    path = get_model_path(sys.argv[1])
+    print(f'==> Model ready on disk: {path}')
+except KeyboardInterrupt:
+    print('\n[!] Download interrupted by user.')
+    sys.exit(130)
+except Exception as e:
+    print(f'[!] Failed to download model: {e}', file=sys.stderr)
+    sys.exit(1)
+" "$target_model"
+}
+
+cmd_pull() {
+    local target_model="${1:-$MODEL}"
+    echo "==> Pulling model weights for: ${target_model}"
+    "$VENV_PYTHON" -c "
+import sys
+from xmlx_vlm.utils import get_model_path
+try:
+    path = get_model_path(sys.argv[1])
+    print(f'✓ Model successfully cached at: {path}')
+except KeyboardInterrupt:
+    print('\n[!] Download interrupted by user.')
+    sys.exit(130)
+except Exception as e:
+    print(f'[!] Failed to download model: {e}', file=sys.stderr)
+    sys.exit(1)
+" "$target_model"
+}
+
 cmd_start() {
     local with_chat=false
     if [[ "${CHAT_ENABLED}" != "false" && "${CHAT_ENABLED}" != "0" ]]; then
@@ -170,6 +210,9 @@ cmd_start() {
 
     parse_server_opts "$@"
     ensure_dirs
+
+    # ── Ensure Model is Downloaded (Interactive Foreground Phase) ──
+    ensure_model_downloaded "$MODEL"
 
     # ── Start Server ──
     if is_running "$SERVER_PID_FILE"; then
@@ -218,8 +261,8 @@ cmd_start() {
         local server_pid=$!
         echo "$server_pid" > "$SERVER_PID_FILE"
 
-        # Wait for health check (models may need time to download on first run)
-        local start_timeout="${XMLX_VLM_START_TIMEOUT:-600}"
+        # Wait for health check (model is already on disk, only loading weights into RAM)
+        local start_timeout="${XMLX_VLM_START_TIMEOUT:-90}"
         local waited=0
         while ! curl -sf "http://localhost:${PORT}/health" >/dev/null 2>&1; do
             if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -227,11 +270,8 @@ cmd_start() {
                 rm -f "$SERVER_PID_FILE"
                 return 1
             fi
-            sleep 2
-            ((waited+=2))
-            if (( waited % 20 == 0 )); then
-                echo "  Still initializing server / downloading weights (${waited}s / ${start_timeout}s)..."
-            fi
+            sleep 1
+            ((waited++))
             if [[ $waited -ge $start_timeout ]]; then
                 echo "ERROR: Server failed to start within ${start_timeout}s. Check ${SERVER_LOG}"
                 rm -f "$SERVER_PID_FILE"
@@ -462,6 +502,9 @@ case "$cmd" in
     start)
         cmd_start "$@"
         ;;
+    pull)
+        cmd_pull "$@"
+        ;;
     stop)
         cmd_stop
         ;;
@@ -483,6 +526,7 @@ XMLX VLM Service Manager
 
 Usage:
   $(basename "$0") start [--no-chat] [SERVER_OPTS]      Start server with chat UI (default)
+  $(basename "$0") pull [MODEL]                          Pre-download model weights interactively
   $(basename "$0") stop                                   Stop server and chat UI
   $(basename "$0") restart [--no-chat] [SERVER_OPTS]    Restart server
   $(basename "$0") status                                 Show running status
