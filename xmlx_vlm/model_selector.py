@@ -364,6 +364,22 @@ def get_full_model_menu() -> Dict[str, Any]:
     }
 
 
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+
+def read_user_input(prompt: str) -> str:
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    if os.path.exists("/dev/tty") and sys.platform != "win32":
+        try:
+            with open("/dev/tty", "r") as tty:
+                return tty.readline().strip()
+        except Exception:
+            pass
+    return sys.stdin.readline().strip()
+
+
 def render_interactive_menu(default_model: Optional[str] = None) -> str:
     """Display dynamic, fully responsive interactive CLI menu."""
     menu_data = get_full_model_menu()
@@ -387,38 +403,38 @@ def render_interactive_menu(default_model: Optional[str] = None) -> str:
         "red": C_RED,
     }
 
-    print(f"\n{C_BOLD}{C_CYAN}================================================================================{C_RESET}")
-    print(f"{C_BOLD}  🚀 XMLX-VLM 动态模型选择器{C_RESET} {C_GRAY}(设备: {C_GREEN}{hw['chip']}{C_GRAY} | 统一内存: {C_GREEN}{hw['ram_gb']} GB{C_GRAY}){C_RESET}")
-    print(f"{C_BOLD}{C_CYAN}================================================================================{C_RESET}")
+    eprint(f"\n{C_BOLD}{C_CYAN}================================================================================{C_RESET}")
+    eprint(f"{C_BOLD}  🚀 XMLX-VLM 动态模型选择器{C_RESET} {C_GRAY}(设备: {C_GREEN}{hw['chip']}{C_GRAY} | 统一内存: {C_GREEN}{hw['ram_gb']} GB{C_GRAY}){C_RESET}")
+    eprint(f"{C_BOLD}{C_CYAN}================================================================================{C_RESET}")
 
     choices_map: Dict[int, Dict[str, Any]] = {}
     idx = 1
 
     # Section 1: Locally Discovered Models
-    print(f"\n{C_BOLD}{C_GREEN}📦 本机已发现并可运行的模型 ({len(local_models)} 个已就绪，无需下载):{C_RESET}")
+    eprint(f"\n{C_BOLD}{C_GREEN}📦 本机已发现并可运行的模型 ({len(local_models)} 个已就绪，无需下载):{C_RESET}")
     if not local_models:
-        print(f"  {C_GRAY}(未在本地缓存目录中找到已下载的模型){C_RESET}")
+        eprint(f"  {C_GRAY}(未在本地缓存目录中找到已下载的模型){C_RESET}")
     else:
         for m in local_models:
             choices_map[idx] = m
             size_str = f" [{m['disk_size_gb']}G | {m['quant']}]"
             c_code = color_map.get(m["color"], C_GREEN)
             compat = f" - {c_code}{m['status_text']}{C_RESET}"
-            print(f"  {C_BOLD}{C_CYAN}[{idx}]{C_RESET} {C_BOLD}{m['id']}{C_RESET}{C_GRAY}{size_str}{C_RESET}{compat}")
+            eprint(f"  {C_BOLD}{C_CYAN}[{idx}]{C_RESET} {C_BOLD}{m['id']}{C_RESET}{C_GRAY}{size_str}{C_RESET}{compat}")
             idx += 1
 
     # Section 2: Tailored Community Recommendations for this machine
-    print(f"\n{C_BOLD}{C_YELLOW}🌐 社区精选模型 (适合本机内存，初次选择将自动极速下载):{C_RESET}")
+    eprint(f"\n{C_BOLD}{C_YELLOW}🌐 社区精选模型 (适合本机内存，初次选择将自动极速下载):{C_RESET}")
     for m in community_models:
         choices_map[idx] = m
         c_code = color_map.get(m["color"], C_YELLOW)
         compat = f" [{c_code}{m['status_text']}{C_RESET}]"
         desc = f" - {C_GRAY}{m['desc']}{C_RESET}"
-        print(f"  {C_BOLD}{C_YELLOW}[{idx}]{C_RESET} {m['id']}{compat}{desc}")
+        eprint(f"  {C_BOLD}{C_YELLOW}[{idx}]{C_RESET} {m['id']}{compat}{desc}")
         idx += 1
 
-    print(f"\n  {C_BOLD}[0]{C_RESET} {C_MAGENTA}输入自定义 HuggingFace Repo ID 或本地磁盘绝对路径...{C_RESET}")
-    print(f"{C_BOLD}{C_CYAN}================================================================================{C_RESET}")
+    eprint(f"\n  {C_BOLD}[0]{C_RESET} {C_MAGENTA}输入自定义 HuggingFace Repo ID 或本地磁盘绝对路径...{C_RESET}")
+    eprint(f"{C_BOLD}{C_CYAN}================================================================================{C_RESET}")
 
     # Determine default recommendation
     default_idx = 1
@@ -439,22 +455,20 @@ def render_interactive_menu(default_model: Optional[str] = None) -> str:
 
     default_name = choices_map.get(default_idx, {}).get("id", "mlx-community/Qwen3.8-27B-4bit")
 
-    # If non-interactive stdin, return default
-    if not sys.stdin.isatty():
+    # If non-interactive stdin without tty, return default immediately
+    if not sys.stdin.isatty() and not os.path.exists("/dev/tty"):
         return default_name
 
     try:
-        sys.stdout.write(f"\n{C_BOLD}请选择要运行的模型编号 [默认: {default_idx} ({default_name})]: {C_RESET}")
-        sys.stdout.flush()
-        user_input = sys.stdin.readline().strip()
+        prompt_text = f"\n{C_BOLD}请选择要运行的模型编号 [默认: {default_idx} ({default_name})]: {C_RESET}"
+        user_input = read_user_input(prompt_text)
 
         if not user_input:
             return default_name
 
         if user_input == "0":
-            sys.stdout.write(f"{C_BOLD}请输入自定义模型名称或本地路径: {C_RESET}")
-            sys.stdout.flush()
-            custom_model = sys.stdin.readline().strip()
+            custom_prompt = f"{C_BOLD}请输入自定义模型名称或本地路径: {C_RESET}"
+            custom_model = read_user_input(custom_prompt)
             return custom_model if custom_model else default_name
 
         try:
@@ -462,14 +476,14 @@ def render_interactive_menu(default_model: Optional[str] = None) -> str:
             if choice_num in choices_map:
                 return choices_map[choice_num]["id"]
             else:
-                print(f"{C_YELLOW}无效编号，使用默认模型: {default_name}{C_RESET}")
+                eprint(f"{C_YELLOW}无效编号，使用默认模型: {default_name}{C_RESET}")
                 return default_name
         except ValueError:
             # If user directly typed a model name string
             return user_input
 
     except (KeyboardInterrupt, EOFError):
-        print("\n[!] 取消选择，退出。")
+        eprint("\n[!] 取消选择，退出。")
         sys.exit(130)
 
 
