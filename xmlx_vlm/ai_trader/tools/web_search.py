@@ -178,18 +178,25 @@ class WebExtractTool:
             # Try BeautifulSoup
             try:
                 from bs4 import BeautifulSoup
-                soup = BeautifulSoup(html, "html.parser")
-                for s in soup(["script", "style", "noscript", "iframe"]):
-                    s.decompose()
-                title = soup.title.string.strip() if soup.title else ""
+                meta_desc = ""
+                meta_tag = soup.find("meta", attrs={"name": re.compile(r"description", re.I)}) or soup.find("meta", attrs={"property": re.compile(r"description", re.I)})
+                if meta_tag and meta_tag.get("content"):
+                    meta_desc = meta_tag["content"].strip()
+
                 # Get structured body text
                 content = soup.get_text(separator="\n")
+                if len(content.strip()) < 100 and meta_desc:
+                    content = f"{meta_desc}\n\n" + content
             except ImportError:
                 # Regex fallback
                 title_match = re.search(r"<title>(.*?)</title>", html, re.I)
                 title = title_match.group(1).strip() if title_match else ""
+                desc_match = re.search(r'<meta\s+[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', html, re.I)
+                meta_desc = desc_match.group(1).strip() if desc_match else ""
                 content = re.sub(r'<(script|style|noscript|iframe)\b[^>]*>([\s\S]*?)<\/\1>', '', html, flags=re.I)
                 content = re.sub(r'<[^>]+>', ' ', content)
+                if len(content.strip()) < 100 and meta_desc:
+                    content = f"{meta_desc}\n\n" + content
             
             # Post-process content whitespace
             lines = [line.strip() for line in content.splitlines()]

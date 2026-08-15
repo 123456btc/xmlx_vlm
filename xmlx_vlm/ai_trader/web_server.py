@@ -1161,12 +1161,18 @@ async def chat_websocket(websocket: WebSocket, session_id: str):
                 async for chunk in agent.generate_stream(session_id, prompt, attachments=attachments):
                     await websocket.send_json(chunk)
                 await websocket.send_json({"type": "done"})
+            except (WebSocketDisconnect, RuntimeError):
+                logger.info("WS connection lost during streaming for session: %s", session_id)
+                break
             except Exception as stream_err:
                 logger.exception("Error in agent generator stream")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Execution error: {str(stream_err)}"
-                })
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Execution error: {str(stream_err)}"
+                    })
+                except Exception:
+                    pass
     except WebSocketDisconnect:
         logger.info("WS disconnected for session: %s", session_id)
     finally:

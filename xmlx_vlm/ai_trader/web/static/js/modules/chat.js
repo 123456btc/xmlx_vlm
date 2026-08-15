@@ -244,6 +244,19 @@ export function connectChatWs(sessionId) {
     };
 }
 
+export function stripToolCalls(text) {
+    if (!text) return "";
+    return text
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+        .replace(/<tool_call>[\s\S]*$/gi, '')
+        .replace(/<function=[^>]+>[\s\S]*?<\/function>/gi, '')
+        .replace(/<function=[^>]+>[\s\S]*$/gi, '')
+        .replace(/<parameter=[^>]+>[\s\S]*?<\/parameter>/gi, '')
+        .replace(/<parameter=[^>]+>[\s\S]*$/gi, '')
+        .replace(/call:\s*\w+\s*\{[^}]*\}/gi, '')
+        .trim();
+}
+
 // Handle WS stream events
 let currentAssistantBubble = null;
 let currentAssistantContent = "";
@@ -264,23 +277,26 @@ export function handleWsEvent(data) {
             }
             currentAssistantThinking += data.content;
             
-            // Render the thinking content inside a details container in the bubble
-            let thinkingContainer = currentAssistantBubble.querySelector('.message-thinking-container');
-            if (!thinkingContainer) {
-                thinkingContainer = document.createElement('div');
-                thinkingContainer.className = 'message-thinking-container';
-                currentAssistantBubble.insertBefore(thinkingContainer, currentAssistantBubble.querySelector('.message-content'));
+            const cleanThinking = stripToolCalls(currentAssistantThinking);
+            if (cleanThinking) {
+                // Render the thinking content inside a details container in the bubble
+                let thinkingContainer = currentAssistantBubble.querySelector('.message-thinking-container');
+                if (!thinkingContainer) {
+                    thinkingContainer = document.createElement('div');
+                    thinkingContainer.className = 'message-thinking-container';
+                    currentAssistantBubble.insertBefore(thinkingContainer, currentAssistantBubble.querySelector('.message-content'));
+                }
+                
+                thinkingContainer.innerHTML = `
+                    <details class="thinking-details" open>
+                        <summary class="thinking-summary">
+                            <i class="fa-solid fa-brain thinking-brain-icon"></i>
+                            <span>AI is thinking...</span>
+                        </summary>
+                        <div class="thinking-content">${escapeHtml(cleanThinking)}</div>
+                    </details>
+                `;
             }
-            
-            thinkingContainer.innerHTML = `
-                <details class="thinking-details" open>
-                    <summary class="thinking-summary">
-                        <i class="fa-solid fa-brain thinking-brain-icon"></i>
-                        <span>AI is thinking...</span>
-                    </summary>
-                    <div class="thinking-content">${escapeHtml(currentAssistantThinking)}</div>
-                </details>
-            `;
             scrollToBottom();
             break;
 
@@ -303,15 +319,34 @@ export function handleWsEvent(data) {
             }
             
             currentAssistantContent += data.content;
-            
-            // Render Markdown
-            currentAssistantBubble.querySelector('.message-content').innerHTML = marked.parse(currentAssistantContent);
+            const cleanContent = stripToolCalls(currentAssistantContent);
+            if (cleanContent) {
+                currentAssistantBubble.querySelector('.message-content').innerHTML = marked.parse(cleanContent);
+            }
             scrollToBottom();
             break;
             
         case 'tool_start':
             showTypingIndicator(`Calling tool: ${data.name}...`);
             
+            // Finalize current assistant bubble if present before starting tool card
+            if (currentAssistantBubble) {
+                const finalContent = stripToolCalls(currentAssistantContent);
+                const finalThinking = stripToolCalls(currentAssistantThinking);
+                if (finalContent) {
+                    currentAssistantBubble.querySelector('.message-content').innerHTML = marked.parse(finalContent);
+                } else if (finalThinking) {
+                    currentAssistantBubble.querySelector('.message-content').innerHTML = marked.parse(finalThinking);
+                    const tContainer = currentAssistantBubble.querySelector('.message-thinking-container');
+                    if (tContainer) tContainer.remove();
+                } else {
+                    currentAssistantBubble.remove();
+                }
+                currentAssistantBubble = null;
+                currentAssistantContent = "";
+                currentAssistantThinking = "";
+            }
+
             // Create tool call box in timeline
             currentToolBlock = document.createElement('div');
             currentToolBlock.className = 'tool-block';
@@ -339,6 +374,11 @@ export function handleWsEvent(data) {
                 detailDiv.textContent += `\n\nOutput:\n${data.output}`;
                 currentToolBlock = null;
             }
+            // Reset assistant bubble reference so the next response begins in a new bubble below the tool card
+            currentAssistantBubble = null;
+            currentAssistantContent = "";
+            currentAssistantThinking = "";
+            showTypingIndicator("AI is synthesizing analysis...");
             scrollToBottom();
             
             // Reload portfolio stats after trading tool executions
