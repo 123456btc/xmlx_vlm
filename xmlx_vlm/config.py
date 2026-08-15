@@ -59,7 +59,7 @@ DEFAULT_FIRST_TOKEN_TIMEOUT = None  # No timeout for first token (prefill) by de
 # Set to 0 to disable automatic KV release.
 DEFAULT_IDLE_KV_RELEASE_TIMEOUT = 300.0  # 5 minutes
 
-DEFAULT_ENABLE_THINKING = False
+DEFAULT_ENABLE_THINKING = True
 DEFAULT_ENABLE_TOOL_LOGITS_BIAS = False
 
 # Maximum number of pending requests in the ResponseGenerator queue.

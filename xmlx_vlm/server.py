@@ -38,7 +38,7 @@ from .server_schemas import get_server_max_tokens
 
 logger = logging.getLogger("xmlx_vlm.server")
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MLX VLM Http Server.")
     parser.add_argument(
         "--host",
@@ -89,12 +89,19 @@ def main():
     )
     parser.add_argument(
         "--enable-thinking",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=DEFAULT_ENABLE_THINKING,
         help=(
-            "Enable thinking mode by default for requests that do not set "
-            "enable_thinking explicitly."
+            "Enable or disable thinking mode by default for requests that do not set "
+            "enable_thinking explicitly (default: %(default)s)."
         ),
+    )
+    parser.add_argument(
+        "--no-thinking",
+        "--disable-thinking",
+        dest="enable_thinking",
+        action="store_false",
+        help="Alias to disable thinking mode by default.",
     )
     parser.add_argument(
         "--default-thinking-budget",
@@ -276,6 +283,11 @@ def main():
             "jump-forward decoding."
         ),
     )
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     global _API_KEY
     _API_KEY = args.api_key

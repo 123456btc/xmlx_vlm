@@ -83,6 +83,7 @@ class LocalServiceLLMClient(BaseLLMClient):
                 f"{self.server_url}/health",
                 headers=headers,
                 timeout=timeout,
+                proxies={"http": None, "https": None},
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -122,6 +123,7 @@ class LocalServiceLLMClient(BaseLLMClient):
                 headers=headers,
                 stream=True,
                 timeout=600,
+                proxies={"http": None, "https": None},
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():

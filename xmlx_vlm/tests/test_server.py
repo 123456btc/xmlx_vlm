@@ -441,7 +441,7 @@ class TestResponseGenerator:
         args = GenerationArguments()
         assert args.max_tokens == DEFAULT_MAX_TOKENS
         assert args.temperature == DEFAULT_TEMPERATURE
-        assert args.enable_thinking is False
+        assert args.enable_thinking is True
         assert args.logit_bias is None
 
     def test_token_queue_timeout_defaults_to_long_prefill_window(self, monkeypatch):
@@ -686,6 +686,14 @@ class TestResponseGenerator:
     def test_build_gen_args_uses_server_thinking_default_when_omitted(
         self, monkeypatch
     ):
+        monkeypatch.delenv("XMLX_VLM_ENABLE_THINKING", raising=False)
+        req = ChatRequest(
+            model="demo",
+            messages=[ChatMessage(role="user", content="hi")],
+        )
+        assert "enable_thinking" not in req.model_fields_set
+        assert _build_gen_args(req).enable_thinking is True
+
         monkeypatch.setenv("XMLX_VLM_ENABLE_THINKING", "1")
         req = ChatRequest(
             model="demo",
@@ -723,6 +731,28 @@ class TestResponseGenerator:
         )
 
         assert _build_gen_args(req).enable_thinking is True
+
+    def test_server_cli_thinking_flags(self):
+        parser = server.build_parser()
+        # Default should be enabled
+        args = parser.parse_args([])
+        assert args.enable_thinking is True
+
+        # Explicit enable
+        args = parser.parse_args(["--enable-thinking"])
+        assert args.enable_thinking is True
+
+        # BooleanOptionalAction negation
+        args = parser.parse_args(["--no-enable-thinking"])
+        assert args.enable_thinking is False
+
+        # Alias: --no-thinking
+        args = parser.parse_args(["--no-thinking"])
+        assert args.enable_thinking is False
+
+        # Alias: --disable-thinking
+        args = parser.parse_args(["--disable-thinking"])
+        assert args.enable_thinking is False
 
     def test_gpu_embed_hashes_pixel_values_without_image_ref(self):
         class Embed:

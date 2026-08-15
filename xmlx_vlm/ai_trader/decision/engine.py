@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
+from xmlx_vlm.agent_core import ThinkScrubber
 from xmlx_vlm.ai_trader.config import DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_SERVER_URL
 from xmlx_vlm.ai_trader.decision.context import TradingContext, TradingStats
 from xmlx_vlm.ai_trader.decision.decision import Decision, FullDecision
@@ -221,8 +222,9 @@ class DecisionEngine:
         )
 
     def _parse_decisions(self, raw_response: str) -> List[Decision]:
-        """从 LLM 输出中解析 JSON 决策数组，支持各种格式和缺失括号的容错."""
-        text = raw_response.strip()
+        """从 LLM 输出中解析 JSON 决策数组，先经 ThinkScrubber 清洗推理思考流，支持各种格式和容错."""
+        clean_text, _ = ThinkScrubber.scrub(raw_response)
+        text = clean_text.strip()
         if not text:
             return []
 
@@ -294,9 +296,9 @@ class DecisionEngine:
         return decisions
 
     def _extract_cot(self, raw_response: str) -> str:
-        """尝试提取 <think>...</think> 中的 CoT."""
-        match = re.search(r"<think>([\s\S]*?)</think>", raw_response)
-        return match.group(1).strip() if match else ""
+        """使用 ThinkScrubber 提取思考推理过程 (CoT)."""
+        _, reasoning = ThinkScrubber.scrub(raw_response)
+        return reasoning or ""
 
     async def _execute_decisions(self, decisions: List[Decision]) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []

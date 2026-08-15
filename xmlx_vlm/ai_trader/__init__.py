@@ -4,10 +4,13 @@
 让用户通过自然语言与本地 VLM 对话即可完成交易决策.
 """
 
-from .tools.market import MarketDataTool
-from .tools.chart import ChartTool
-from .tools.trading import TradingTool
-from .tools.registry import ToolRegistry
+try:
+    from .tools.market import MarketDataTool
+    from .tools.chart import ChartTool
+    from .tools.trading import TradingTool
+    from .tools.registry import ToolRegistry
+except ImportError:
+    pass
 
 __all__ = [
     "MarketDataTool",

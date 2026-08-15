@@ -11,7 +11,8 @@
 #   XMLX_VLM_PORT        Server port (default: 5118)
 #   XMLX_VLM_CHAT_PORT   Chat UI port (default: 5119)
 #   XMLX_VLM_API_KEY     API key for auth (default: x123456)
-#   XMLX_VLM_ARGS        Extra args passed to server (e.g. --enable-thinking)
+#   XMLX_VLM_ENABLE_THINKING Enable thinking mode (default: true)
+#   XMLX_VLM_ARGS        Extra args passed to server
 #   XMLX_VLM_WATCHLIST   Comma-separated custom watchlist (e.g. BTC,ETH,SOL)
 #   XMLX_VLM_WATCHLIST_SIZE  Number of top volume coins to trade (default: 3)
 #
@@ -20,8 +21,13 @@
 #   --draft-kind {dflash,mtp}   Drafter family
 #   --kv-bits BITS              KV cache quantization bits
 #   --kv-quant-scheme SCHEME    {uniform,turboquant}
+#   --thinking / --enable-thinking     Enable thinking mode (default: enabled)
+#   --no-thinking / --disable-thinking Disable thinking mode
 
 set -euo pipefail
+
+export NO_PROXY="localhost,127.0.0.1,0.0.0.0,::1"
+export no_proxy="localhost,127.0.0.1,0.0.0.0,::1"
 
 # ─── Configuration ──────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +54,9 @@ KV_QUANT_SCHEME="${XMLX_VLM_KV_QUANT_SCHEME:-turboquant}"
 # Default to launching chat UI alongside the server.
 # Set XMLX_VLM_CHAT=false (or use --no-chat) to start server only.
 CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
+
+# Thinking mode (default: true, set XMLX_VLM_ENABLE_THINKING=false or use --no-thinking to disable)
+ENABLE_THINKING="${XMLX_VLM_ENABLE_THINKING:-true}"
 
 # Computer Use mode: gui | autonomous | gui_voice | autonomous_voice
 COMPUTER_MODE="${XMLX_VLM_COMPUTER_MODE:-autonomous}"
@@ -169,6 +178,14 @@ parse_server_opts() {
             --chat|--no-chat)
                 shift
                 ;;
+            --thinking|--enable-thinking)
+                ENABLE_THINKING=true
+                shift
+                ;;
+            --no-thinking|--disable-thinking|--no-enable-thinking)
+                ENABLE_THINKING=false
+                shift
+                ;;
             --strategy)
                 START_STRATEGY=true
                 shift
@@ -255,6 +272,11 @@ cmd_start() {
         echo "  Model: ${MODEL}"
         echo "  Port:  ${PORT}"
         [[ -n "$API_KEY" ]] && echo "  Auth:  enabled"
+        if [[ "$ENABLE_THINKING" == "true" || "$ENABLE_THINKING" == "1" ]]; then
+            echo "  Thinking: enabled (default)"
+        else
+            echo "  Thinking: disabled"
+        fi
         [[ -n "$DRAFT_MODEL" ]] && echo "  Draft: ${DRAFT_MODEL} (${DRAFT_KIND})"
         [[ -n "$KV_BITS" ]] && echo "  KV:    ${KV_BITS} bits (${KV_QUANT_SCHEME})"
         [[ ${#SERVER_OPTS[@]} -gt 0 ]] && echo "  Extra: ${SERVER_OPTS[*]}"
@@ -266,6 +288,20 @@ cmd_start() {
             --port "$PORT"
         )
         [[ -n "$API_KEY" ]] && server_args+=(--api-key "$API_KEY")
+        # Thinking mode (user can override via --thinking / --no-thinking or SERVER_OPTS)
+        local has_thinking_opt=false
+        if [[ ${#SERVER_OPTS[@]} -gt 0 ]]; then
+            for opt in "${SERVER_OPTS[@]}"; do
+                [[ "$opt" == "--enable-thinking" || "$opt" == "--no-enable-thinking" || "$opt" == "--no-thinking" || "$opt" == "--disable-thinking" ]] && has_thinking_opt=true
+            done
+        fi
+        if [[ "$has_thinking_opt" == false ]]; then
+            if [[ "$ENABLE_THINKING" == "true" || "$ENABLE_THINKING" == "1" ]]; then
+                server_args+=(--enable-thinking)
+            else
+                server_args+=(--no-enable-thinking)
+            fi
+        fi
         # Default speculative decoding (user can override via SERVER_OPTS)
         [[ -n "$DRAFT_MODEL" ]] && server_args+=(--draft-model "$DRAFT_MODEL")
         [[ -n "$DRAFT_KIND" ]] && server_args+=(--draft-kind "$DRAFT_KIND")

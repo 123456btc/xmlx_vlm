@@ -6,6 +6,13 @@ Handles iframes, Shadow DOM, ProseMirror editors automatically.
 
 import json, os, re, sys, time, asyncio, websockets, urllib.request
 
+from xmlx_vlm.agent_core import (
+    ContextCompressor,
+    ThinkScrubber,
+    ToolCallGuardrailConfig,
+    ToolCallGuardrails,
+)
+
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 MLX_URL = os.environ.get("MLX_URL", "http://localhost:5118")
@@ -307,7 +314,7 @@ def ask_model(messages):
     return result.get("choices",[{}])[0].get("message",{}).get("content","")
 
 def generate_comment(article_text):
-    """Generate a clean comment from article text. Handles Qwen's verbose reasoning."""
+    """Generate a clean comment from article text using ThinkScrubber for reasoning filtering."""
     body = json.dumps({
         "model": MODEL, "max_tokens": 1024, "temperature": 0.7,
         "messages": [
@@ -319,10 +326,10 @@ def generate_comment(article_text):
     with urllib.request.urlopen(req, timeout=60) as r:
         result = json.loads(r.read())
     raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-    text = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+    text, _ = ThinkScrubber.scrub(raw)
     text = re.sub(r'\*+', '', text)  # Remove markdown
 
-    # Qwen ALWAYS dumps reasoning. Extract only real comment sentences.
+    # Extract only real comment sentences.
     all_sentences = re.findall(r'([A-Z][^.!?]{20,}[.!?])', text)
 
     # Filter out meta-reasoning — NOT part of a real comment
@@ -341,21 +348,21 @@ def generate_comment(article_text):
 
 
 def parse(text):
-    text = re.sub(r'<think>.*?</think>','',text,flags=re.DOTALL).strip()
+    text, _ = ThinkScrubber.scrub(text)
     start = text.find('{"tool"')
-    if start<0: start=text.find('{ "tool"')
-    if start>=0:
-        d=0
-        for i in range(start,len(text)):
-            if text[i]=='{': d+=1
-            elif text[i]=='}':
-                d-=1
-                if d==0:
+    if start < 0: start = text.find('{ "tool"')
+    if start >= 0:
+        d = 0
+        for i in range(start, len(text)):
+            if text[i] == '{': d += 1
+            elif text[i] == '}':
+                d -= 1
+                if d == 0:
                     try: return json.loads(text[start:i+1])
                     except: break
-    for m in re.finditer(r'\{[^{}]+\}',text):
+    for m in re.finditer(r'\{[^{}]+\}', text):
         try:
-            o=json.loads(m.group(0))
+            o = json.loads(m.group(0))
             if "tool" in o: return o
         except: continue
     return None
@@ -386,7 +393,6 @@ async def run(task):
     # FAST PATH: If this is a "go to site + find article + comment" task, skip the model for navigation
     if is_comment and topic_words:
         topic = " ".join(topic_words)
-        # Detect which site
         site_url = "https://news.yahoo.com"
         for site in ["yahoo","reddit","cnn","bbc","nytimes"]:
             if site in task.lower():
@@ -432,70 +438,64 @@ async def run(task):
             print(f"         {D}→ No article found with topic '{topic}', falling back to model{RS}")
 
     messages = [{"role":"user","content":f"Task: {task}\n\nINSTRUCTIONS:\n- Start by navigating to the relevant site.\n- Use snapshot() to see the page.\n- Use click(), type_text(), scroll(), js() to interact.\n- Call done(message) when the task is complete. Summarize what you found in the message."}]
-    click_counts = {}  # Track how many times each UID is clicked
-    last_snapshot = ""  # Track last snapshot to detect stuck state
-    last_url = ""  # Track last URL to detect stuck state
-    action_history = []  # Track recent actions for loop detection
+    
+    # Initialize enterprise-grade Tool Guardrails & Context Compressor
+    guardrails = ToolCallGuardrails(
+        ToolCallGuardrailConfig(
+            warnings_enabled=True,
+            hard_stop_enabled=True,
+            exact_failure_warn_after=2,
+            exact_failure_block_after=4,
+            no_progress_warn_after=2,
+            no_progress_block_after=4,
+        )
+    )
+    compressor = ContextCompressor(
+        max_context_tokens=8192,
+        compression_threshold=0.75,
+        tail_token_budget=2048,
+    )
+    last_snapshot = ""
 
     for step in range(1, MAX_STEPS+1):
-        t0=time.time(); resp=ask_model(messages); elapsed=time.time()-t0
+        t0 = time.time()
+        resp = ask_model(messages)
+        elapsed = time.time() - t0
         tc = parse(resp)
         if not tc:
             print(f"  {D}Step {step} (no tool) {elapsed:.1f}s{RS}")
-            messages.append({"role":"assistant","content":resp})
-            messages.append({"role":"user","content":'Respond with ONLY: {"tool":"name","args":{...}}'})
+            clean_resp, reasoning = ThinkScrubber.scrub(resp)
+            messages.append({"role": "assistant", "content": clean_resp or resp})
+            messages.append({"role": "user", "content": 'Respond with ONLY: {"tool":"name","args":{...}}'})
             continue
 
-        tool=tc.get("tool",""); args=tc.get("args",{})
-        action_key = json.dumps({"tool": tool, "args": args}, sort_keys=True)
-        action_history.append(action_key)
-        if len(action_history) > 8: action_history.pop(0)
-
-        # ─── Loop Detection ─────────────────────────────────────────
-        loop_detected = False
-        if tool == "click":
-            uid = str(args.get("uid", ""))
-            click_counts[uid] = click_counts.get(uid, 0) + 1
-            if click_counts[uid] > 2:
-                loop_detected = True
-                print(f"  {Y}Step {step} LOOP DETECTED: uid {uid} clicked {click_counts[uid]} times — forcing Escape + snapshot{RS}")
-        # Detect A-B-A-B action pattern
-        if len(action_history) >= 4 and not loop_detected:
-            if action_history[-1] == action_history[-3] and action_history[-2] == action_history[-4]:
-                loop_detected = True
-                print(f"  {Y}Step {step} LOOP DETECTED: repeating action pattern — forcing js recovery{RS}")
-
-        if loop_detected:
-            # Auto-recover: press Escape (closes lightboxes/overlays), then force a snapshot
-            await cdp.js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
-            await asyncio.sleep(0.5)
-            r = await cdp.snapshot()
-            messages.append({"role":"assistant","content":json.dumps({"tool":"js","args":{"code":"Escape"}})})
-            messages.append({"role":"user","content":f"Result: LOOP DETECTED — you are repeating actions but the page is NOT changing. I pressed Escape to close any overlay. Here is a fresh snapshot — use js(code) or navigate() to a DIFFERENT approach:\n\n{r[:3000]}"})
-            continue
-
-        args_s=', '.join(f'{k}={repr(v)[:40]}' for k,v in args.items())
+        tool = tc.get("tool", "")
+        args = tc.get("args", {})
+        args_s = ', '.join(f'{k}={repr(v)[:40]}' for k, v in args.items())
         print(f"  {D}Step {step}{RS} {B}{tool}{RS}({args_s}) {D}{elapsed:.1f}s{RS}")
 
-        # Get URL before action (only meaningful for click/type_text)
-        url_before = await cdp.js("document.URL") if tool in ("click","type_text") else ""
+        # Get URL before action
+        url_before = await cdp.js("document.URL") if tool in ("click", "type_text", "navigate") else ""
 
-        if tool=="navigate": r=await cdp.navigate(args.get("url",""))
-        elif tool=="snapshot":
-            r=await cdp.snapshot()
-            # Detect stuck state: snapshot looks the same as last time
+        if tool == "navigate":
+            r = await cdp.navigate(args.get("url", ""))
+        elif tool == "snapshot":
+            r = await cdp.snapshot()
             if last_snapshot and r == last_snapshot:
-                r = r + "\n\n⚠️ WARNING: This snapshot is IDENTICAL to the previous one. The page has NOT changed. Try a different approach — scroll, press Escape, or navigate to a different URL."
+                r = r + "\n\n⚠️ WARNING: This snapshot is IDENTICAL to the previous one. The page has NOT changed. Try a different approach."
             last_snapshot = r
-        elif tool=="click": r=await cdp.click(str(args.get("uid","")))
-        elif tool=="type_text": r=await cdp.type_into(str(args.get("uid","")),args.get("text",""))
-        elif tool=="scroll": r=await cdp.scroll(args.get("direction","down"))
-        elif tool=="comment": r=await cdp.post_comment(args.get("text",""))
-        elif tool=="js": r=await cdp.js(args.get("code",""))
-        elif tool=="done":
-            # If this is a comment task, auto-comment before finishing
+        elif tool == "click":
+            r = await cdp.click(str(args.get("uid", "")))
+        elif tool == "type_text":
+            r = await cdp.type_into(str(args.get("uid", "")), args.get("text", ""))
+        elif tool == "scroll":
+            r = await cdp.scroll(args.get("direction", "down"))
+        elif tool == "comment":
+            r = await cdp.post_comment(args.get("text", ""))
+        elif tool == "js":
+            r = await cdp.js(args.get("code", ""))
+        elif tool == "done":
             if is_comment:
-                # If no comment text provided, generate one from article content
                 if not comment_text:
                     print(f"\n  {BD}Generating comment from article...{RS}")
                     article_text = await cdp.js("var el=document.querySelector('article, main, [role=main]');(el&&el.innerText?el.innerText.substring(0,500):document.title)")
@@ -506,26 +506,55 @@ async def run(task):
                 result = await cdp.post_comment(comment_text)
                 print(f"  {result}")
             print(f"\n{G}{BD}Done:{RS} {args.get('message','')}")
-            await cdp.close(); return
-        else: r=f"Unknown: {tool}"
+            await cdp.close()
+            return
+        else:
+            r = f"Unknown: {tool}"
 
-        # Detect stuck page: URL should change after click/type_text. Scroll/js don't navigate.
-        if tool in ("click","type_text"):
-            url_after = await cdp.js("document.URL")
-            if url_after == url_before:
-                r = f"{r}\n\n⚠️ NOTE: URL did NOT change after {tool}(). The page is likely stuck. Try js(code) or navigate() instead."
-            last_url = url_after
-        elif tool == "navigate":
-            last_url = ""
-            last_snapshot = ""
+        # Current state signature for loop / no-progress tracking
+        url_after = await cdp.js("document.URL") if tool in ("click", "type_text", "navigate") else ""
+        current_state_signature = url_after or url_before
 
-        if len(r)>4000: r=r[:4000]+"...(truncated)"
-        messages.append({"role":"assistant","content":json.dumps(tc)})
-        messages.append({"role":"user","content":f"Result: {r}"})
-        if len(messages)>10: messages=messages[:1]+messages[-8:]
+        is_error = str(r).lower().startswith("error")
+        decision = guardrails.observe_and_check(
+            tool=tool,
+            args=args,
+            result=r,
+            is_error=is_error,
+            state_signature=current_state_signature,
+        )
+
+        if decision.action in ("warn", "block", "halt"):
+            print(f"  {Y}Guardrail [{decision.action.upper()}]: {decision.reason}{RS}")
+            if decision.synthetic_message:
+                r = f"{r}\n\n{decision.synthetic_message}"
+
+            # Auto-recover on loop or blocking: press Escape and snapshot
+            if decision.action in ("warn", "block") and "loop" in str(decision.reason).lower():
+                await cdp.js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+                await asyncio.sleep(0.5)
+
+            if decision.should_halt:
+                print(f"  {R}Halting agent step due to guardrail policy.{RS}")
+                break
+
+        if len(r) > 4000:
+            r = r[:4000] + "...(truncated)"
+
+        messages.append({"role": "assistant", "content": json.dumps(tc)})
+        messages.append({"role": "user", "content": f"Result: {r}"})
+
+        # Apply Anti-Hijack Context Compression if history token budget is exceeded
+        if compressor.should_compress(messages):
+            messages, was_compressed = compressor.compress(messages)
+            if was_compressed:
+                print(f"  {D}→ Context safely compacted with anti-hijack protection.{RS}")
+        elif len(messages) > 12:
+            # Fallback compression for short limits
+            messages, _ = compressor.compress(messages, force=True)
+
         print(f"         {D}→ {r[:160].replace(chr(10),' ')}{RS}")
 
-    # If we hit max steps on a comment task, try commenting on whatever page we're on
     if is_comment:
         if not comment_text:
             article_text = await cdp.js("document.title + '. ' + Array.from(document.querySelectorAll('p')).map(p=>p.innerText).filter(t=>t.length>40).slice(0,6).join(' ')")

@@ -12,6 +12,7 @@ import time
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional
 
+from .columnar_store import ColumnarMarketStore
 from .indicators import adx, atr, ema, rsi, volume_profile
 from .kline_db import KlineDB
 from .models import (
@@ -306,6 +307,29 @@ class SymbolState:
                     if len(self._bars[tf]) > 200:
                         self._bars[tf].pop(0)
                     self._kline_db.save_bar(current)
+                    
+                    # Also persist to Columnar Store
+                    try:
+                        latest_oi = self.latest_oi.open_interest if self.latest_oi else 0.0
+                        latest_funding = self.latest_funding.funding_rate if self.latest_funding else 0.0
+                        cvd_val = self.get_cvd("1h")
+                        imbalance_val = self.book_imbalance(10)
+                        ColumnarMarketStore.get_instance().append_bar(
+                            symbol=self.symbol,
+                            timeframe=tf,
+                            ts=current.timestamp_ms,
+                            o=current.open,
+                            h=current.high,
+                            l=current.low,
+                            c=current.close,
+                            v=current.volume,
+                            cvd=cvd_val,
+                            oi=latest_oi,
+                            funding=latest_funding,
+                            imbalance=imbalance_val,
+                        )
+                    except Exception as exc:
+                        logger.debug("Failed to record columnar bar: %s", exc)
                 # Start new partial bar
                 current = Bar(
                     symbol=self.symbol,

@@ -56,6 +56,12 @@ action 可选值：
      - 若要完全平仓，action 设为 close_long / close_short，将 position_size_usd 设为 null 或等于/大于当前持仓名义价值。
      - 若要部分减仓，action 设为 close_long / close_short，将 position_size_usd 设为希望减仓的名义价值（USD），系统会执行部分平仓。
 
+4. 交易频率与心理学自律（Anti-Overtrading & Frequency Discipline）：
+   - 优秀量化交易员标准：日均 2-4 笔高质量交易（≈ 0.1-0.2 笔/小时）。
+   - 严禁过度交易（Overtrading）：单小时内 > 2 笔开仓属于严重刷单与过拟合行为，会导致高额手续费磨损与胜率骤降。
+   - 单笔持仓周期意识：优质趋势单的期望持仓时间应在 45-90 分钟以上；持仓小于 15 分钟且未触及硬止损的频繁调仓属于冲动杂音行为（Too Impulsive）。
+   - 顺势与再入场冷静期：若前一笔交易被止损平仓，禁止在同周期内立即报复性追单，必须等待盘口出现新的确认信号或保持冷静期。
+
 价格口径：以 mark_price 为基准。"""
 
 

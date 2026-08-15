@@ -20,6 +20,12 @@ from xmlx_vlm.generate import stream_generate
 from xmlx_vlm.prompt_utils import apply_chat_template
 from xmlx_vlm.vision_cache import VisionFeatureCache
 
+from xmlx_vlm.agent_core import (
+    ContextCompressor,
+    ThinkScrubber,
+    ToolCallGuardrailConfig,
+    ToolCallGuardrails,
+)
 from xmlx_vlm.ai_trader.config import DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_SERVER_URL
 from xmlx_vlm.ai_trader.store.session_db import QuantSessionDB
 from xmlx_vlm.ai_trader.tools.registry import ToolRegistry
@@ -88,6 +94,23 @@ class AITraderAgent:
         self.vision_cache = VisionFeatureCache()
         self.prompt_cache_state = None
         
+        # Enterprise Guardrails & Context Compressor
+        self.guardrails = ToolCallGuardrails(
+            ToolCallGuardrailConfig(
+                warnings_enabled=True,
+                hard_stop_enabled=True,
+                exact_failure_warn_after=2,
+                exact_failure_block_after=3,
+                no_progress_warn_after=2,
+                no_progress_block_after=4,
+            )
+        )
+        self.compressor = ContextCompressor(
+            max_context_tokens=16384,
+            compression_threshold=0.75,
+            tail_token_budget=4096,
+        )
+
         # Pending approvals future dictionary: tool_call_id -> asyncio.Future
         self.pending_approvals: Dict[str, asyncio.Future] = {}
 
@@ -97,7 +120,10 @@ class AITraderAgent:
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
             resp = requests.get(
-                f"{self.server_url}/health", headers=headers, timeout=3
+                f"{self.server_url}/health",
+                headers=headers,
+                timeout=3,
+                proxies={"http": None, "https": None},
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -245,7 +271,7 @@ class AITraderAgent:
                     "max_tokens": 20,
                     "temperature": 0.1,
                 }
-                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), trust_env=False) as client:
                     resp = await client.post(
                         f"{self.server_url}/v1/chat/completions",
                         json=payload,
@@ -387,6 +413,13 @@ class AITraderAgent:
                 if current_state == AgentState.PLANNING:
                     db_messages = self.db.get_messages(session_id)
                     
+                    # Apply Anti-Hijack Context Compression if messages exceed token budget or count
+                    if self.compressor.should_compress(db_messages) or len(db_messages) > 16:
+                        compressed_msgs, was_comp = self.compressor.compress(db_messages)
+                        if was_comp:
+                            logger.info("Session [%s] context compressed with Anti-Hijack prefix", session_id)
+                            db_messages = compressed_msgs
+
                     # Stream text from model
                     model_output = ""
                     server_tool_calls = []
@@ -411,15 +444,20 @@ class AITraderAgent:
                     llm_duration = time.perf_counter() - t0_llm
                     tracer.log_step("llm_planning_stream", llm_duration, {"session_id": session_id})
                     
-                    # Check for tool calls (either structured from server or parsed from raw text)
-                    tool_calls = server_tool_calls or parse_tool_calls(model_output)
+                    # Use ThinkScrubber to separate reasoning from clean tool/text payload
+                    clean_output, reasoning = ThinkScrubber.scrub(model_output)
+                    if reasoning:
+                        tracer.log_step("llm_reasoning_extracted", 0.0, {"reasoning_length": len(reasoning)})
+
+                    # Check for tool calls (either structured from server or parsed from clean text)
+                    tool_calls = server_tool_calls or parse_tool_calls(clean_output or model_output)
                     if not tool_calls:
-                        explanation = remove_tool_calls(model_output)
+                        explanation = remove_tool_calls(clean_output or model_output)
                         self.db.add_message(
                             message_id=str(uuid.uuid4()),
                             session_id=session_id,
                             role="assistant",
-                            content=explanation or model_output,
+                            content=explanation or clean_output or model_output,
                         )
                         current_state = AgentState.COMPLETED
                     else:
@@ -485,9 +523,23 @@ class AITraderAgent:
                     # Run parallel gathers
                     results = await asyncio.gather(*[run_readonly(c) for c in readonly_calls])
 
-                    # Process results and yield tool_end events
+                    # Process results, evaluate guardrails, and yield tool_end events
                     for c, out, chart_url in results:
                         n = c.get("name")
+                        a = c.get("arguments", {})
+                        
+                        # Check guardrails
+                        is_error = str(out).lower().startswith("error")
+                        decision = self.guardrails.observe_and_check(
+                            tool=n,
+                            args=a if isinstance(a, dict) else {},
+                            result=out,
+                            is_error=is_error,
+                        )
+                        feedback_content = f"工具 {n} 的返回结果：\n{out}"
+                        if decision.synthetic_message:
+                            feedback_content += f"\n\n{decision.synthetic_message}"
+
                         if chart_url:
                             yield {"type": "image_render", "url": chart_url}
                         yield {
@@ -500,7 +552,7 @@ class AITraderAgent:
                             message_id=str(uuid.uuid4()),
                             session_id=session_id,
                             role="user",
-                            content=f"工具 {n} 的返回结果：\n{out}",
+                            content=feedback_content,
                         )
                     
                     # Clear processed readonly tools
@@ -585,6 +637,18 @@ class AITraderAgent:
                     
                     tracer.log_step(f"tool_{name}", time.perf_counter() - t0_tool, {"args": args})
 
+                    # Check guardrails on sensitive trading action
+                    is_error = str(output).lower().startswith("error") or "execution error" in str(output).lower()
+                    guard_decision = self.guardrails.observe_and_check(
+                        tool=name,
+                        args=args if isinstance(args, dict) else {},
+                        result=output,
+                        is_error=is_error,
+                    )
+                    feedback_content = f"工具 {name} 的返回结果：\n{output}"
+                    if guard_decision.synthetic_message:
+                        feedback_content += f"\n\n{guard_decision.synthetic_message}"
+
                     # Log trade if it's trading execution
                     if name == "trading" and args.get("action") == "place_order" and "已提交" in output:
                         try:
@@ -593,8 +657,6 @@ class AITraderAgent:
                             side = args.get("side", "buy")
                             qty = float(args.get("qty", 0))
                             
-                            # Simple extraction of price from output
-                            import re
                             price_match = re.search(r"@\s*([\d\.]+)", output)
                             price = float(price_match.group(1)) if price_match else 0.0
                             
@@ -623,7 +685,7 @@ class AITraderAgent:
                         message_id=str(uuid.uuid4()),
                         session_id=session_id,
                         role="user",
-                        content=f"工具 {name} 的返回结果：\n{output}",
+                        content=feedback_content,
                     )
 
                     # Remove completed sensitive call
@@ -688,7 +750,7 @@ class AITraderAgent:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0), trust_env=False) as client:
                 async with client.stream(
                     "POST",
                     f"{self.server_url}/v1/chat/completions",

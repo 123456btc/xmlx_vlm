@@ -707,5 +707,36 @@ class MarketDataService:
             }
         return result
 
+    def get_historical_columnar(
+        self,
+        symbol: str,
+        timeframe: str = "1m",
+        start_ts: Optional[int] = None,
+        end_ts: Optional[int] = None,
+        limit: Optional[int] = 100,
+        as_of_ms: Optional[int] = None,
+    ) -> Dict[str, List[Any]]:
+        """
+        Query columnar market series with Point-in-Time (`as_of_ms`) isolation.
+        """
+        from .columnar_store import ColumnarMarketStore
+        coin = symbol.upper().replace("/USDC", "").replace("/USD", "")
+        return ColumnarMarketStore.get_instance().query_columnar(
+            symbol=coin,
+            timeframe=timeframe,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            limit=limit,
+            as_of_ms=as_of_ms,
+        )
+
+    def get_snapshot_as_of(self, symbol: str, as_of_ms: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve historical point-in-time state snapshot without lookahead bias.
+        """
+        from .columnar_store import ColumnarMarketStore
+        coin = symbol.upper().replace("/USDC", "").replace("/USD", "")
+        return ColumnarMarketStore.get_instance().get_snapshot_as_of(coin, as_of_ms=as_of_ms)
+
     def get_connection_state(self) -> str:
         return "running" if self._started and self._thread is not None and self._thread.is_alive() else "stopped"

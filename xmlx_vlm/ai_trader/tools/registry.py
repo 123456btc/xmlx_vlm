@@ -57,22 +57,26 @@ class ToolRegistry:
         from xmlx_vlm.mcp.manager import MCPManager
         from xmlx_vlm.mcp.config import validate_config
 
-        # 1. Load hermes config
-        config_path = Path("~/.hermes/config.yaml").expanduser()
+        # 1. Load MCP config from ~/.xmlx_vlm/config.yaml (or legacy fallback)
+        config_path = Path("~/.xmlx_vlm/config.yaml").expanduser()
         if not config_path.exists():
-            logger.info("No hermes config found at ~/.hermes/config.yaml, skipping MCP setup.")
-            return
+            legacy_path = Path("~/.hermes/config.yaml").expanduser()
+            if legacy_path.exists():
+                config_path = legacy_path
+            else:
+                logger.info("No MCP config found at ~/.xmlx_vlm/config.yaml, skipping MCP setup.")
+                return
 
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
         except Exception as e:
-            logger.warning(f"Failed to load hermes config: {e}")
+            logger.warning(f"Failed to load MCP config: {e}")
             return
 
         mcp_servers = data.get("mcp_servers", {})
         if not mcp_servers:
-            logger.info("No mcp_servers found in ~/.hermes/config.yaml.")
+            logger.info("No mcp_servers found in MCP config.")
             return
 
         # Transform to validate_config structure expected by xmlx_vlm.mcp

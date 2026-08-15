@@ -1236,6 +1236,43 @@ class MarketDataTool:
                 return self.get_open_interest(symbol, exchange)
             if action == "get_market_summary":
                 return self.get_market_summary(symbol, exchange, depth=depth)
+            if action == "get_columnar_series":
+                as_of = kwargs.get("as_of")
+                as_of_ms = int(as_of) if as_of is not None else None
+                from xmlx_vlm.ai_trader.market_service.columnar_store import ColumnarMarketStore
+                coin = self._coin(symbol)
+                col_data = ColumnarMarketStore.get_instance().query_columnar(
+                    symbol=coin,
+                    timeframe=timeframe,
+                    limit=limit,
+                    as_of_ms=as_of_ms,
+                )
+                return json.dumps(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "as_of_ms": as_of_ms,
+                        "row_count": len(col_data.get("timestamp", [])),
+                        "columns": col_data,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            if action == "get_point_in_time_snapshot":
+                as_of = kwargs.get("as_of")
+                as_of_ms = int(as_of) if as_of is not None else None
+                from xmlx_vlm.ai_trader.market_service.columnar_store import ColumnarMarketStore
+                coin = self._coin(symbol)
+                snap = ColumnarMarketStore.get_instance().get_snapshot_as_of(coin, as_of_ms=as_of_ms)
+                return json.dumps(
+                    {
+                        "symbol": symbol,
+                        "as_of_ms": as_of_ms,
+                        "snapshot": snap,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
             return f"错误：未知的 action={action}"
         except Exception as exc:
             logger.exception("market_data tool failed")

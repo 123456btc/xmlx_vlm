@@ -5,6 +5,7 @@
 """
 
 from .alerts import AlertConfig, AlertEngine
+from .columnar_store import ColumnarChunk, ColumnarMarketStore, SymbolPartition
 from .events import EventBus, MarketEvent
 from .service import MarketDataService
 from .state import MarketState, SymbolState
@@ -12,9 +13,12 @@ from .state import MarketState, SymbolState
 __all__ = [
     "AlertConfig",
     "AlertEngine",
+    "ColumnarChunk",
+    "ColumnarMarketStore",
     "EventBus",
     "MarketDataService",
     "MarketEvent",
     "MarketState",
+    "SymbolPartition",
     "SymbolState",
 ]
