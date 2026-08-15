@@ -13,6 +13,7 @@ from xmlx_vlm.ai_trader.tools.market import MarketDataTool
 # Re-add if visual chart analysis is needed in future.
 from xmlx_vlm.ai_trader.tools.trading import TradingTool
 from xmlx_vlm.ai_trader.tools.web_search import WebSearchTool, WebExtractTool
+from xmlx_vlm.ai_trader.tools.code_sandbox import ExecuteCodeTool
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class ToolRegistry:
         exchange: str = "paper",
         risk_profile: str = "conservative",
         dry_run: bool = False,
+        enable_ptc: bool = True,
     ):
         self._tools: Dict[str, Any] = {}
         self.register(MarketDataTool())
@@ -37,6 +39,8 @@ class ToolRegistry:
                 oms=None,  # 懒加载
             )
         )
+        if enable_ptc:
+            self.register(ExecuteCodeTool())
         self.mcp_manager = None
         self.loop = None
 

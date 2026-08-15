@@ -96,6 +96,11 @@ class TradingTool:
                 "type": "number",
                 "description": "限价单价格（order_type=limit 时必填）",
             },
+            "post_only": {
+                "type": "boolean",
+                "description": "只做 Maker 挂单 (Post-Only)，若会立即成交则自动取消，避免产生 Taker 摩擦手续费",
+                "default": False,
+            },
         },
         "required": ["action"],
     }
@@ -199,6 +204,7 @@ class TradingTool:
         mode: str = "paper",
         order_type: str = "market",
         price: Optional[float] = None,
+        post_only: bool = False,
     ) -> str:
         settings = self.oms.settings
 
@@ -217,16 +223,23 @@ class TradingTool:
         except Exception as exc:
             logger.warning("failed to get mark price for risk check: %s", exc)
 
-        # 构建订单：市价单无 price 时，用 mark_price 计算名义金额以通过风控
+        # 如果启用 post_only，强制使用 limit 挂单价格
+        actual_order_type = order_type
         order_price = Decimal(str(price)) if price is not None else None
-        if order_type == "market" and order_price is None and mark_price is not None:
+        if post_only:
+            actual_order_type = "limit"
+            if order_price is None and mark_price is not None:
+                order_price = mark_price
+
+        # 构建订单：市价单无 price 时，用 mark_price 计算名义金额以通过风控
+        if actual_order_type == "market" and order_price is None and mark_price is not None:
             order_price = mark_price
 
         order = self.oms.create_order(
             symbol=symbol,
             side=side,
             qty=Decimal(str(qty)),
-            order_type=order_type,
+            order_type=actual_order_type,
             price=order_price,
         )
 
@@ -289,6 +302,7 @@ class TradingTool:
                     mode=kwargs.get("mode", "paper"),
                     order_type=kwargs.get("order_type", "market"),
                     price=kwargs.get("price"),
+                    post_only=bool(kwargs.get("post_only", False)),
                 )
             if action == "close_position":
                 return self.close_position(kwargs.get("symbol", ""))

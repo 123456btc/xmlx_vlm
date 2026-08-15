@@ -13,6 +13,7 @@ from xmlx_vlm.ai_trader.config import DEFAULT_API_KEY, DEFAULT_SERVER_URL, DEFAU
 from xmlx_vlm.ai_trader.store.session_db import QuantSessionDB
 from xmlx_vlm.ai_trader.agent.config import AgentObjective
 from xmlx_vlm.ai_trader.agent.decision import ActionType, SignalEvaluation, TradeProposal
+from xmlx_vlm.ai_trader.agent.verifier import DeterministicProposalVerifier, VerificationResult
 from xmlx_vlm.ai_trader.market_service.events import IndicatorAlertEvent
 from xmlx_vlm.ai_trader.oms.utils.decimal import to_decimal, ZERO
 from xmlx_vlm.ai_trader.agent.telemetry import QuantTracer
@@ -23,8 +24,20 @@ logger = logging.getLogger(__name__)
 class SignalEvaluator:
     """评估原始市场信号，转换为结构化交易提案."""
 
-    def __init__(self, objective: AgentObjective):
+    def __init__(
+        self,
+        objective: AgentObjective,
+        verifier: Optional[DeterministicProposalVerifier] = None,
+    ):
         self.objective = objective
+        max_risk_pct = 0.02
+        if hasattr(objective.risk_budget, "max_risk_pct_per_trade") and objective.risk_budget.max_risk_pct_per_trade:
+            max_risk_pct = float(objective.risk_budget.max_risk_pct_per_trade) / 100.0
+
+        self.verifier = verifier or DeterministicProposalVerifier(
+            min_rr=float(objective.position_constraint.min_risk_reward_ratio),
+            max_risk_pct=max_risk_pct,
+        )
 
     def evaluate(
         self,
@@ -123,10 +136,11 @@ class SignalEvaluator:
             logger.debug("Sized to zero for %s", evaluation.symbol)
             return None
 
-        return TradeProposal(
+        proposal = TradeProposal(
             action=action,
             symbol=evaluation.symbol,
             size_usd=size_usd,
+            entry_price=mark_price,
             leverage=min(constraint.max_leverage, max(1, int(size_usd / equity * 2))),
             confidence=evaluation.confidence,
             stop_loss=evaluation.stop_loss,
@@ -137,6 +151,20 @@ class SignalEvaluator:
             reason=", ".join(evaluation.notes),
             variant_id=variant_id,
         )
+
+        if self.verifier:
+            ver_res = self.verifier.verify_proposal(proposal, equity=equity)
+            proposal.verification_info = {
+                "passed": ver_res.passed,
+                "rejection_reasons": ver_res.rejection_reasons,
+                "warnings": ver_res.warnings,
+                "metrics": ver_res.metrics,
+            }
+            if not ver_res.passed:
+                logger.info("Proposal for %s failed deterministic verification: %s", evaluation.symbol, ver_res.summary())
+                return None
+
+        return proposal
 
     # ── 内部辅助 ──
     def _extract_price(self, payload: Dict[str, Any], key: str) -> Optional[Decimal]:

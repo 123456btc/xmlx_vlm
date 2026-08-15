@@ -43,6 +43,13 @@ class MarketDataService:
         summary = service.get_summary("BTC")
     """
 
+    _instance: Optional[MarketDataService] = None
+
+    @classmethod
+    def get_instance(cls) -> Optional[MarketDataService]:
+        """获取当前活跃的 MarketDataService 单例实例."""
+        return cls._instance
+
     def __init__(
         self,
         url: str = "wss://api.hyperliquid.xyz/ws",
@@ -52,6 +59,7 @@ class MarketDataService:
         alert_config: Optional[AlertConfig] = None,
         watched_coins: Optional[List[str]] = None,
     ) -> None:
+        MarketDataService._instance = self
         self.event_bus = event_bus or EventBus()
         self.state = MarketState()
         self._lock = threading.RLock()
@@ -78,6 +86,10 @@ class MarketDataService:
         self._last_published_price: dict[str, float] = {}
         self._price_publish_threshold = 0.0001  # 0.01% minimum move to trigger publish
         self._watched_coins = [c.upper() for c in watched_coins] if watched_coins else None
+
+    @property
+    def is_running(self) -> bool:
+        return self._started
 
     # ── 生命周期 ──
     def start(self) -> None:

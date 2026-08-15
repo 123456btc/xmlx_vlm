@@ -94,6 +94,8 @@ class TradeProposal:
     risk_reward_ratio: Decimal = ZERO
     reason: str = ""
     variant_id: str = "default"
+    verification_info: Optional[Dict[str, Any]] = None
+    entry_price: Optional[Decimal] = None
 
     def __post_init__(self):
         if isinstance(self.action, str):
@@ -104,6 +106,8 @@ class TradeProposal:
         self.expected_return_pct = to_decimal(self.expected_return_pct)
         self.expected_risk_pct = to_decimal(self.expected_risk_pct)
         self.risk_reward_ratio = to_decimal(self.risk_reward_ratio)
+        if self.entry_price is not None:
+            self.entry_price = to_decimal(self.entry_price)
         if self.stop_loss is not None:
             self.stop_loss = to_decimal(self.stop_loss)
         if self.take_profit is not None:
@@ -132,6 +136,7 @@ class TradeProposal:
             "symbol": self.symbol,
             "side": self.side,
             "size_usd": str(self.size_usd),
+            "entry_price": str(self.entry_price) if self.entry_price is not None else None,
             "leverage": self.leverage,
             "confidence": self.confidence,
             "stop_loss": str(self.stop_loss) if self.stop_loss is not None else None,
@@ -141,6 +146,7 @@ class TradeProposal:
             "risk_reward_ratio": str(self.risk_reward_ratio),
             "reason": self.reason,
             "variant_id": self.variant_id,
+            "verification_info": self.verification_info,
         }
 
 
