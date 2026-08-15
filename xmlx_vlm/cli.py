@@ -27,12 +27,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--adapter", type=str, default=None, help="LoRA adapter path")
 
 
+from .version import __version__
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xmlx_vlm",
         description="Unified CLI for MLX Vision-Language Models",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
