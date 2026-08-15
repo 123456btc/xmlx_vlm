@@ -52,6 +52,9 @@ CHAT_ENABLED="${XMLX_VLM_CHAT:-true}"
 # Computer Use mode: gui | autonomous | gui_voice | autonomous_voice
 COMPUTER_MODE="${XMLX_VLM_COMPUTER_MODE:-autonomous}"
 
+# Strategy engine auto-start (default: false for interactive chat mode, --strategy to enable)
+START_STRATEGY="${XMLX_VLM_STRATEGY:-false}"
+
 # Watchlist configuration
 WATCHLIST="${XMLX_VLM_WATCHLIST:-}"
 WATCHLIST_SIZE="${XMLX_VLM_WATCHLIST_SIZE:-3}"
@@ -344,7 +347,7 @@ cmd_start() {
     fi
 
     # ── Start AI Strategy Engine ──
-    if [[ "$START_STRATEGY" != false ]]; then
+    if [[ "${START_STRATEGY:-false}" == "true" ]]; then
         if is_running "$STRATEGY_PID_FILE"; then
             echo "AI Strategy Engine already running (PID: $(cat "$STRATEGY_PID_FILE"))"
         else
