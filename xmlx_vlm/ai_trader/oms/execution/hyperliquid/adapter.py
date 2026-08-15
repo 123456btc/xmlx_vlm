@@ -16,6 +16,9 @@ from xmlx_vlm.ai_trader.oms.exceptions import AdapterError, ConfigurationError
 
 from xmlx_vlm.ai_trader.oms.execution.hyperliquid.mapper import (
     coin_from_symbol,
+    format_hl_cloid,
+    format_hl_price,
+    format_hl_size,
     hl_positions_to_positions,
     hl_response_to_order,
     order_to_hl_action,
@@ -74,6 +77,11 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
         # Store in-memory symbol maps
         self._cloid_to_symbol = {}
         self._order_id_to_symbol = {}
+        # Default szDecimals map with dynamic discovery
+        self._sz_decimals: Dict[str, int] = {
+            "BTC": 5, "ETH": 4, "SOL": 2, "PURR": 0, "DOGE": 0, "SUI": 1, "AVAX": 2,
+            "ARB": 1, "OP": 1, "NEAR": 1, "APT": 2, "LINK": 2, "PEPE": 0, "WIF": 1,
+        }
 
         # Instantiate the SDK Exchange object if private_key is available
         self._exchange_sdk = None
@@ -100,6 +108,22 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize Hyperliquid Exchange SDK: {e}")
+
+    def _get_sz_decimals(self, coin: str) -> int:
+        """获取币种的数量小数位数."""
+        if coin in self._sz_decimals:
+            return self._sz_decimals[coin]
+        try:
+            meta = self._client.info({"type": "meta"})
+            universe = meta.get("universe", [])
+            for u in universe:
+                c_name = u.get("name")
+                c_dec = u.get("szDecimals", 4)
+                if c_name:
+                    self._sz_decimals[c_name] = c_dec
+            return self._sz_decimals.get(coin, 4)
+        except Exception:
+            return 4
 
     @property
     def name(self) -> str:
@@ -135,48 +159,72 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
         return "BTC"
 
     async def submit(self, order: Order) -> OrderAck:
+        from xmlx_vlm.ai_trader.oms.constants import OrderType
         order.exchange = self.name
         coin = coin_from_symbol(order.symbol)
+        sz_decimals = self._get_sz_decimals(coin)
 
         # Store symbol mapping
         if order.client_order_id:
             self._cloid_to_symbol[order.client_order_id] = coin
 
+        is_buy = (order.side == OrderSide.BUY)
+        is_market = (order.order_type == OrderType.MARKET)
+        
+        # 数量与价格格式化
+        sz = format_hl_size(float(order.qty), sz_decimals=sz_decimals)
+        
+        # 处理市价单滑点价格与限价单价格
+        limit_px = float(order.price) if order.price else 0.0
+        if is_market:
+            tif = "Ioc"
+            if limit_px <= 0.0:
+                # 尝试从 allMids 获取当前标记价
+                try:
+                    all_mids = self._client.info({"type": "allMids"})
+                    if isinstance(all_mids, dict) and coin in all_mids:
+                        limit_px = float(all_mids[coin])
+                except Exception:
+                    pass
+            # 施加 1% 滑点保护
+            if limit_px > 0.0:
+                limit_px = limit_px * 1.01 if is_buy else limit_px * 0.99
+            else:
+                # 若无法获取且为 0，防止报错设为安全极值
+                limit_px = 1000000.0 if is_buy else 0.0001
+        else:
+            tif = "Gtc"
+
+        limit_px = format_hl_price(limit_px)
+        cloid_hex = format_hl_cloid(order.client_order_id)
+        reduce_only = bool(order.reduce_only)
+
         # Use the SDK if available
         if self._exchange_sdk:
             from hyperliquid.utils.types import Cloid
-            is_buy = order.side == OrderSide.BUY
-            sz = float(order.qty)
-            limit_px = float(order.price) if order.price else 0.0
-            order_type = {"limit": {"tif": "Gtc"}}
+            order_type = {"limit": {"tif": tif}}
 
-            # Format cloid
-            cloid = None
-            if order.client_order_id:
+            cloid_obj = None
+            if cloid_hex and len(cloid_hex) == 34:
                 try:
-                    cloid_hex = order.client_order_id.replace("-", "")
-                    if not cloid_hex.startswith("0x"):
-                        cloid_hex = "0x" + cloid_hex
-                    if len(cloid_hex) == 34:
-                        cloid = Cloid(cloid_hex)
+                    cloid_obj = Cloid(cloid_hex)
                 except Exception as e:
-                    logger.warning(f"Failed to parse client_order_id as Cloid: {e}")
+                    logger.warning(f"Failed to instantiate Cloid({cloid_hex}): {e}")
 
             try:
-                # Place order synchronously using the SDK
+                # Place order using SDK with reduce_only & IOC support
                 response = self._exchange_sdk.order(
                     name=coin,
                     is_buy=is_buy,
                     sz=sz,
                     limit_px=limit_px,
                     order_type=order_type,
-                    reduce_only=False,
-                    cloid=cloid
+                    reduce_only=reduce_only,
+                    cloid=cloid_obj
                 )
                 order.raw_response = response
                 hl_response_to_order(response, order)
 
-                # Store order ID to symbol mapping if received
                 if order.order_id:
                     self._order_id_to_symbol[order.order_id] = coin
 
@@ -191,7 +239,12 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
                 raise AdapterError(f"SDK order placement failed: {exc}") from exc
 
         # Fallback to manual signing
-        action = order_to_hl_action(order)
+        action = order_to_hl_action(order, sz_decimals=sz_decimals)
+        # Ensure calculated market limit_px and reduceOnly are reflected in manual action
+        if action.get("orders"):
+            action["orders"][0]["limitPx"] = limit_px
+            action["orders"][0]["reduceOnly"] = reduce_only
+
         timestamp_ms = int(time.time() * 1000)
         payload = self._signer.sign(action, timestamp_ms)
 
@@ -213,22 +266,14 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
 
     async def cancel(self, order_id: str, client_order_id: Optional[str] = None) -> CancelAck:
         coin = await self._get_coin_for_order(order_id, client_order_id)
+        cloid_hex = format_hl_cloid(client_order_id)
 
         # Use the SDK if available
         if self._exchange_sdk:
             try:
-                use_cloid = False
-                cloid_val = None
-                if client_order_id:
-                    cloid_hex = client_order_id.replace("-", "")
-                    if not cloid_hex.startswith("0x"):
-                        cloid_hex = "0x" + cloid_hex
-                    if len(cloid_hex) == 34:
-                        from hyperliquid.utils.types import Cloid
-                        cloid_val = Cloid(cloid_hex)
-                        use_cloid = True
-
-                if use_cloid:
+                if cloid_hex and len(cloid_hex) == 34:
+                    from hyperliquid.utils.types import Cloid
+                    cloid_val = Cloid(cloid_hex)
                     response = self._exchange_sdk.cancel_by_cloid(coin, cloid_val)
                 else:
                     response = self._exchange_sdk.cancel(coin, int(order_id))
@@ -252,17 +297,7 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
         except Exception:
             pass
 
-        use_cloid = False
-        cloid_hex = ""
-        if client_order_id:
-            h = client_order_id.replace("-", "")
-            if not h.startswith("0x"):
-                h = "0x" + h
-            if len(h) == 34:
-                cloid_hex = h
-                use_cloid = True
-
-        if use_cloid:
+        if cloid_hex and len(cloid_hex) == 34:
             action = {
                 "type": "cancelByCloid",
                 "cancels": [{"asset": asset_idx, "cloid": cloid_hex}],

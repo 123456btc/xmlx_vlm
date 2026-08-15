@@ -51,9 +51,10 @@ class Order:
     price: Optional[Decimal] = None
     stop_px: Optional[Decimal] = None
     time_in_force: TimeInForce = TimeInForce.GTC
+    reduce_only: bool = False
 
-    # 标识
-    client_order_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
+    # 标识 (使用标准 32-char UUID hex，加上 0x 前缀正好符合 Hyperliquid 34-char 128-bit Cloid 规范)
+    client_order_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     order_id: Optional[str] = None
     parent_order_id: Optional[str] = None
     algo_id: Optional[str] = None
@@ -166,6 +167,7 @@ class Order:
             "price": str(self.price) if self.price is not None else None,
             "stop_px": str(self.stop_px) if self.stop_px is not None else None,
             "time_in_force": self.time_in_force.value,
+            "reduce_only": self.reduce_only,
             "state": self.state.value,
             "filled_qty": str(self.filled_qty),
             "avg_fill_price": str(self.avg_fill_price),
@@ -187,7 +189,8 @@ class Order:
             price=Decimal(data["price"]) if data.get("price") else None,
             stop_px=Decimal(data["stop_px"]) if data.get("stop_px") else None,
             time_in_force=TimeInForce(data["time_in_force"]),
-            client_order_id=data.get("client_order_id", uuid.uuid4().hex[:16]),
+            reduce_only=bool(data.get("reduce_only", False)),
+            client_order_id=data.get("client_order_id", uuid.uuid4().hex),
             order_id=data.get("order_id"),
             parent_order_id=data.get("parent_order_id"),
             algo_id=data.get("algo_id"),

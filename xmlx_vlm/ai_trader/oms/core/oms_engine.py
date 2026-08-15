@@ -170,6 +170,7 @@ class OMSEngine:
         price: Optional[Any] = None,
         stop_px: Optional[Any] = None,
         time_in_force: str = "GTC",
+        reduce_only: bool = False,
         client_order_id: Optional[str] = None,
     ) -> Order:
         """创建 DRAFT 订单."""
@@ -184,6 +185,7 @@ class OMSEngine:
             price=to_decimal(price) if price is not None else None,
             stop_px=to_decimal(stop_px) if stop_px is not None else None,
             time_in_force=time_in_force,
+            reduce_only=reduce_only,
             client_order_id=client_order_id,
         )
 
@@ -428,7 +430,7 @@ class OMSEngine:
         )
 
         if flatten and self.settings.auto_flatten_on_kill:
-            # 市价平掉所有持仓
+            # 市价平掉所有持仓（严格带有 reduce_only=True 保护）
             results = []
             for pos in self.portfolio.list_positions():
                 close_side = "sell" if pos.is_long() else "buy"
@@ -437,6 +439,7 @@ class OMSEngine:
                     side=close_side,
                     qty=pos.qty,
                     order_type="market",
+                    reduce_only=True,
                 )
                 try:
                     result = await self.submit_order(order)
@@ -448,7 +451,7 @@ class OMSEngine:
         return {"status": "killed"}
 
     async def close_position(self, symbol: str) -> Optional[Order]:
-        """Close an active position for the given symbol, offsetting long/short directions."""
+        """Close an active position for the given symbol, offsetting long/short directions with reduce_only=True."""
         await self.sync()
         
         target = symbol.upper()
@@ -468,6 +471,7 @@ class OMSEngine:
             side=close_side,
             qty=pos.qty,
             order_type="market",
+            reduce_only=True,
         )
         
         # Determine mark price for wind-down order validation

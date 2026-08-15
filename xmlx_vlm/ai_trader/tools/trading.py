@@ -101,6 +101,11 @@ class TradingTool:
                 "description": "只做 Maker 挂单 (Post-Only)，若会立即成交则自动取消，避免产生 Taker 摩擦手续费",
                 "default": False,
             },
+            "reduce_only": {
+                "type": "boolean",
+                "description": "只减仓模式 (Reduce-Only)，仅用于平仓或减仓，绝不会开出反向仓位",
+                "default": False,
+            },
         },
         "required": ["action"],
     }
@@ -205,6 +210,7 @@ class TradingTool:
         order_type: str = "market",
         price: Optional[float] = None,
         post_only: bool = False,
+        reduce_only: bool = False,
     ) -> str:
         settings = self.oms.settings
 
@@ -241,6 +247,7 @@ class TradingTool:
             qty=Decimal(str(qty)),
             order_type=actual_order_type,
             price=order_price,
+            reduce_only=reduce_only,
         )
 
         try:
@@ -303,6 +310,7 @@ class TradingTool:
                     order_type=kwargs.get("order_type", "market"),
                     price=kwargs.get("price"),
                     post_only=bool(kwargs.get("post_only", False)),
+                    reduce_only=bool(kwargs.get("reduce_only", False)),
                 )
             if action == "close_position":
                 return self.close_position(kwargs.get("symbol", ""))

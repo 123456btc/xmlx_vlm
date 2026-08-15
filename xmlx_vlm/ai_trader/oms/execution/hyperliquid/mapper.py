@@ -31,25 +31,72 @@ def coin_from_symbol(symbol: str) -> str:
     return symbol
 
 
-def order_to_hl_action(order: Order) -> Dict[str, Any]:
+def format_hl_price(px: float) -> float:
+    """Hyperliquid 价格格式化：最多 5 位有效数字，最多 6 位小数."""
+    if px <= 0:
+        return 0.0
+    # 5 位有效数字
+    from decimal import Decimal
+    d = Decimal(str(px))
+    # 格式化为最多 5 位有效数字
+    formatted = float(f"{px:.5g}")
+    return round(formatted, 6)
+
+
+def format_hl_size(sz: float, sz_decimals: int = 4) -> float:
+    """Hyperliquid 下单数量格式化：按照资产规定的 szDecimals 截断/舍入."""
+    if sz <= 0:
+        return 0.0
+    return round(sz, sz_decimals)
+
+
+def format_hl_cloid(client_order_id: Optional[str]) -> Optional[str]:
+    """格式化为 Hyperliquid 标准 128-bit (16 bytes) 34 字符 hex Cloid (0x...)."""
+    if not client_order_id:
+        return None
+    h = str(client_order_id).replace("-", "").strip()
+    if not h.startswith("0x"):
+        h = "0x" + h
+    # 若不足 34 位则右补 0，若超过则截取 34 位
+    if len(h) < 34:
+        h = h.ljust(34, "0")
+    elif len(h) > 34:
+        h = h[:34]
+    return h
+
+
+def order_to_hl_action(order: Order, sz_decimals: int = 4) -> Dict[str, Any]:
     """把内部 Order 转为 Hyperliquid 下单 action."""
     coin = coin_from_symbol(order.symbol)
-    tif = HL_TIF_MAP.get(order.time_in_force, "Gtc")
+    
+    # 区分市价单与限价单
+    is_market = (order.order_type == OrderType.MARKET)
+    if is_market:
+        tif = "Ioc"
+    else:
+        tif = HL_TIF_MAP.get(order.time_in_force, "Gtc")
+
+    limit_px = float(order.price) if order.price else 0.0
+    formatted_px = format_hl_price(limit_px)
+    formatted_sz = format_hl_size(float(order.qty), sz_decimals=sz_decimals)
+    cloid = format_hl_cloid(order.client_order_id)
+
+    order_entry: Dict[str, Any] = {
+        "coin": coin,
+        "isBuy": order.side == OrderSide.BUY,
+        "sz": formatted_sz,
+        "limitPx": formatted_px,
+        "orderType": {
+            "limit": {"tif": tif}
+        },
+        "reduceOnly": bool(order.reduce_only),
+    }
+    if cloid:
+        order_entry["cloid"] = cloid
+
     action: Dict[str, Any] = {
         "type": "order",
-        "orders": [
-            {
-                "coin": coin,
-                "isBuy": order.side == OrderSide.BUY,
-                "sz": float(order.qty),
-                "limitPx": float(order.price) if order.price else float(ZERO),
-                "orderType": {
-                    "limit": {"tif": tif}
-                },
-                "reduceOnly": False,
-                "cloid": order.client_order_id,
-            }
-        ],
+        "orders": [order_entry],
         "grouping": "na",
     }
     return action
