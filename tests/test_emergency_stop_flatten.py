@@ -99,3 +99,56 @@ async def test_reduce_only_orders_exempt_from_kill_switch_lock():
         mock_adapter_submit.return_value = type("Ack", (), {"success": True, "order_id": "123", "message": "ok", "raw": {}})()
         res = await engine.submit_order(close_order, mark_price=150.0)
         assert res is not None
+
+
+@pytest.mark.asyncio
+async def test_reduce_only_exempt_from_all_risk_rules():
+    """Verify Margin, PositionLimit, DailyLoss, RateLimit rules allow reduce_only closing orders."""
+    from xmlx_vlm.ai_trader.oms.risk.rules.margin_rule import MarginRule
+    from xmlx_vlm.ai_trader.oms.risk.rules.position_limit_rule import PositionLimitRule
+    from xmlx_vlm.ai_trader.oms.risk.rules.daily_loss_rule import DailyLossRule
+    from xmlx_vlm.ai_trader.oms.risk.rules.rate_limit_rule import RateLimitRule
+    from xmlx_vlm.ai_trader.oms.interfaces.risk_engine import RiskContext
+    from xmlx_vlm.ai_trader.oms.core.portfolio import Portfolio
+    from xmlx_vlm.ai_trader.oms.constants import RiskDecisionType
+
+    portfolio = Portfolio()
+    context = RiskContext(
+        portfolio=portfolio,
+        mark_price=Decimal("100"),
+        account_equity=Decimal("1000"),
+    )
+
+    close_order = Order(
+        symbol="BTC/USDC",
+        side=OrderSide.SELL,
+        order_type="market",
+        qty=Decimal("1.0"),
+        price=Decimal("100"),
+        reduce_only=True,
+    )
+
+    # 1. MarginRule
+    margin_rule = MarginRule(min_available_margin_pct=Decimal("50.0"))
+    decision = margin_rule.pre_trade(close_order, context)
+    assert decision.decision == RiskDecisionType.PASS
+
+    # 2. PositionLimitRule
+    pos_rule = PositionLimitRule(max_single_position_pct=Decimal("10.0"))
+    decision = pos_rule.pre_trade(close_order, context)
+    assert decision.decision == RiskDecisionType.PASS
+
+    # 3. DailyLossRule
+    loss_rule = DailyLossRule(max_daily_loss_pct=Decimal("1.0"))
+    loss_rule._daily_realized_pnl = Decimal("-500")  # Huge loss
+    loss_rule._starting_equity = Decimal("1000")
+    decision = loss_rule.pre_trade(close_order, context)
+    assert decision.decision == RiskDecisionType.PASS
+
+    # 4. RateLimitRule
+    rate_rule = RateLimitRule(max_orders_per_second=1)
+    rate_rule._second_window.append(1000)
+    rate_rule._second_window.append(1001)  # Window full
+    decision = rate_rule.pre_trade(close_order, context)
+    assert decision.decision == RiskDecisionType.PASS
+

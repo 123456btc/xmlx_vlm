@@ -29,6 +29,13 @@ class DailyLossRule(RiskRule):
         return "daily_loss"
 
     def pre_trade(self, order: Order, context: RiskContext) -> RiskDecision:
+        if order.reduce_only:
+            return RiskDecision(
+                decision=RiskDecisionType.PASS,
+                rule_name=self.name,
+                reason="reduce only order allowed to close position / stop loss",
+            )
+
         self._reset_if_new_day()
         equity = to_decimal(context.portfolio.account.equity)
         if equity <= ZERO:

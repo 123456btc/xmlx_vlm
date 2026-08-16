@@ -51,6 +51,13 @@ class OrderSizeRule(RiskRule):
                 metadata={"notional": str(notional)},
             )
         if notional < self.min_order_notional:
+            if order.reduce_only:
+                return RiskDecision(
+                    decision=RiskDecisionType.PASS,
+                    rule_name=self.name,
+                    reason="reduce only closing order allowed below min notional",
+                    metadata={"notional": str(notional)},
+                )
             return RiskDecision(
                 decision=RiskDecisionType.REJECT,
                 rule_name=self.name,

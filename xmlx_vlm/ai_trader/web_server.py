@@ -1051,9 +1051,16 @@ async def trigger_emergency_stop():
     try:
         oms = _get_oms()
         res = await oms.emergency_stop(flatten=True)
-        flatten_count = len(res.get("flatten_results", []))
-        msg = f"急停已触发，已执行全平操作（处理 {flatten_count} 个持仓标的）并锁定新开仓。"
-        return {"status": "success", "message": msg, "details": res}
+        flatten_results = res.get("flatten_results", [])
+        errors = [r for r in flatten_results if "error" in r]
+        flatten_count = len(flatten_results)
+        if errors:
+            err_symbols = [r.get("symbol", "unknown") for r in errors]
+            msg = f"急停已触发并锁定开仓，但 {len(errors)} 个标的平仓遇到问题: {', '.join(err_symbols)}。详情: {res}"
+            return {"status": "partial_error", "message": msg, "details": res}
+        else:
+            msg = f"急停已触发，已成功全平所有持仓（共 {flatten_count} 个标的）并锁定新开仓。"
+            return {"status": "success", "message": msg, "details": res}
     except Exception as e:
         logger.exception("Emergency stop failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

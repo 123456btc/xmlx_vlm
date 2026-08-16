@@ -31,6 +31,13 @@ class RateLimitRule(RiskRule):
         return "rate_limit"
 
     def pre_trade(self, order: Order, context: RiskContext) -> RiskDecision:
+        if order.reduce_only:
+            return RiskDecision(
+                decision=RiskDecisionType.PASS,
+                rule_name=self.name,
+                reason="reduce only order exempt from rate limit",
+            )
+
         now = utc_now_ms()
         cutoff_minute = now - 60_000
         cutoff_second = now - 1_000

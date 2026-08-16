@@ -22,6 +22,13 @@ class MarginRule(RiskRule):
         return "margin"
 
     def pre_trade(self, order: Order, context: RiskContext) -> RiskDecision:
+        if order.reduce_only:
+            return RiskDecision(
+                decision=RiskDecisionType.PASS,
+                rule_name=self.name,
+                reason="reduce only order releases margin",
+            )
+
         equity = to_decimal(context.portfolio.account.equity)
         available = to_decimal(context.portfolio.account.available_margin)
         if equity <= ZERO:

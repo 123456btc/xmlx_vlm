@@ -27,6 +27,13 @@ class PositionLimitRule(RiskRule):
         return "position_limit"
 
     def pre_trade(self, order: Order, context: RiskContext) -> RiskDecision:
+        if order.reduce_only:
+            return RiskDecision(
+                decision=RiskDecisionType.PASS,
+                rule_name=self.name,
+                reason="reduce only order reduces position exposure",
+            )
+
         equity = to_decimal(context.portfolio.account.equity)
         if equity <= ZERO:
             return RiskDecision(

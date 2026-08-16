@@ -76,6 +76,31 @@ CHAT_LOG="${LOG_DIR}/chat.log"
 STRATEGY_LOG="${LOG_DIR}/strategies.log"
 STRATEGY_CONFIG="${SCRIPT_DIR}/xmlx_vlm/ai_trader/strategies.json"
 
+# ─── Colors & Formatting ───────────────────────────────────────────────────
+if [[ -t 1 ]]; then
+    BOLD='\033[1m'
+    DIM='\033[2m'
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    MAGENTA='\033[0;35m'
+    CYAN='\033[0;36m'
+    WHITE='\033[1;37m'
+    NC='\033[0m' # No Color
+else
+    BOLD=''
+    DIM=''
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    MAGENTA=''
+    CYAN=''
+    WHITE=''
+    NC=''
+fi
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
 ensure_dirs() {
     mkdir -p "${PID_DIR}" "${LOG_DIR}"
@@ -111,6 +136,130 @@ kill_port() {
             kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
         done
     fi
+}
+
+print_service_summary() {
+    local title="${1:-XMLX-VLM 服务运行信息 / Service Information}"
+
+    # Query live model name if server is running
+    local live_model=""
+    if is_running "$SERVER_PID_FILE" || [[ -n "$(pid_of_port "$PORT")" ]]; then
+        live_model="$(curl -sf "http://localhost:${PORT}/health" 2>/dev/null | grep -o '"loaded_model":"[^"]*"' | cut -d'"' -f4 || true)"
+    fi
+    local display_model="${live_model:-$MODEL}"
+
+    local server_pid_val=""
+    local server_state="stopped"
+    if is_running "$SERVER_PID_FILE"; then
+        server_pid_val="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
+        server_state="running"
+    else
+        local p_pid
+        p_pid="$(pid_of_port "$PORT")"
+        if [[ -n "$p_pid" ]]; then
+            server_pid_val="${p_pid}"
+            server_state="running"
+            echo "$p_pid" > "$SERVER_PID_FILE" 2>/dev/null || true
+        fi
+    fi
+
+    local chat_pid_val=""
+    local chat_state="stopped"
+    if is_running "$CHAT_PID_FILE"; then
+        chat_pid_val="$(cat "$CHAT_PID_FILE" 2>/dev/null || true)"
+        chat_state="running"
+    else
+        local c_pid
+        c_pid="$(pid_of_port "$CHAT_PORT")"
+        if [[ -n "$c_pid" ]]; then
+            chat_pid_val="${c_pid}"
+            chat_state="running"
+            echo "$c_pid" > "$CHAT_PID_FILE" 2>/dev/null || true
+        fi
+    fi
+
+    local strategy_pid_val=""
+    local strategy_state="stopped"
+    if is_running "$STRATEGY_PID_FILE"; then
+        strategy_pid_val="$(cat "$STRATEGY_PID_FILE" 2>/dev/null || true)"
+        strategy_state="running"
+    fi
+
+    printf "\n"
+    printf "%b\n" "${CYAN}================================================================================${NC}"
+    printf "%b\n" "  ${BOLD}${WHITE}🚀 ${title}${NC}"
+    printf "%b\n" "${CYAN}================================================================================${NC}"
+    printf "\n"
+
+    # ── 1. Model Inference API ──
+    printf "%b\n" "  ${BOLD}${GREEN}🧠 1. 本地大模型推理 API / Local Model Inference API${NC}"
+    printf "%b\n" "  ${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    if [[ "$server_state" == "running" ]]; then
+        printf "%b\n" "  • 运行状态 (Status):     ${GREEN}● 运行中 / Running${NC} (PID: ${server_pid_val})"
+    else
+        printf "%b\n" "  • 运行状态 (Status):     ${RED}○ 已停止 / Stopped${NC}"
+    fi
+    printf "%b\n" "  • 访问端口 (Port):       ${BOLD}${YELLOW}${PORT}${NC}"
+    printf "%b\n" "  • 服务地址 (Base URL):   ${BOLD}${CYAN}http://localhost:${PORT}${NC}  ${DIM}(或 http://127.0.0.1:${PORT})${NC}"
+    if [[ -n "$API_KEY" ]]; then
+        printf "%b\n" "  • 访问密码 / 密钥 (Key): ${BOLD}${YELLOW}${API_KEY}${NC}"
+        printf "%b\n" "  • 认证请求头 (Header):   ${BOLD}Authorization: Bearer ${API_KEY}${NC}"
+    else
+        printf "%b\n" "  • 访问密码 / 密钥 (Key): ${DIM}无需密码 (未启用 API_KEY)${NC}"
+    fi
+    printf "%b\n" "  • 当前加载模型 (Model):  ${CYAN}${display_model}${NC}"
+    printf "%b\n" "  • 核心协议端点 (API Endpoints):"
+    printf "%b\n" "    - OpenAI 聊天接口:     ${DIM}POST${NC} ${BOLD}http://localhost:${PORT}/v1/chat/completions${NC}"
+    printf "%b\n" "    - Anthropic 消息接口:  ${DIM}POST${NC} ${BOLD}http://localhost:${PORT}/v1/messages${NC}"
+    printf "%b\n" "    - 模型信息查询:        ${DIM}GET${NC}  ${BOLD}http://localhost:${PORT}/v1/models${NC}"
+    printf "%b\n" "    - 服务健康检查:        ${DIM}GET${NC}  ${BOLD}http://localhost:${PORT}/health${NC}"
+    printf "\n"
+
+    # ── 2. Trading OS Web Console ──
+    printf "%b\n" "  ${BOLD}${GREEN}📊 2. Trading OS 量化交易 Web 终端 / Trading OS Web Console${NC}"
+    printf "%b\n" "  ${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    if [[ "$chat_state" == "running" ]]; then
+        printf "%b\n" "  • 运行状态 (Status):     ${GREEN}● 运行中 / Running${NC} (PID: ${chat_pid_val})"
+    else
+        printf "%b\n" "  • 运行状态 (Status):     ${RED}○ 已停止 / Stopped${NC}"
+    fi
+    printf "%b\n" "  • 访问端口 (Port):       ${BOLD}${YELLOW}${CHAT_PORT}${NC}"
+    printf "%b\n" "  • 终端网址 (Web URL):    ${BOLD}${CYAN}http://localhost:${CHAT_PORT}${NC}"
+    if [[ -n "$API_KEY" ]]; then
+        printf "%b\n" "  • 终端密码 / Token:      ${BOLD}${YELLOW}${API_KEY}${NC} ${DIM}(系统已自动联通配置)${NC}"
+    fi
+    printf "%b\n" "  • 终端功能:              ${DIM}4 角色多智能体自主盯盘、实时行情看板、策略执行与风控审批${NC}"
+    printf "\n"
+
+    # ── 3. AI Strategy Engine (if running or requested) ──
+    local sec_idx=3
+    if [[ "$strategy_state" == "running" || "${START_STRATEGY:-false}" == "true" ]]; then
+        printf "%b\n" "  ${BOLD}${GREEN}⚡ ${sec_idx}. AI 策略引擎 / AI Strategy Engine${NC}"
+        printf "%b\n" "  ${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        if [[ "$strategy_state" == "running" ]]; then
+            printf "%b\n" "  • 运行状态 (Status):     ${GREEN}● 运行中 / Running${NC} (PID: ${strategy_pid_val})"
+        else
+            printf "%b\n" "  • 运行状态 (Status):     ${RED}○ 未运行 / Stopped${NC}"
+        fi
+        if [[ -n "${WATCHLIST}" ]]; then
+            printf "%b\n" "  • 监控币种 (Watchlist):  ${CYAN}${WATCHLIST}${NC}"
+        else
+            printf "%b\n" "  • 监控币种 (Watchlist):  ${CYAN}Top-${WATCHLIST_SIZE} 成交量主流币 (动态轮巡)${NC}"
+        fi
+        printf "\n"
+        sec_idx=4
+    fi
+
+    # ── Quick Commands ──
+    printf "%b\n" "  ${BOLD}${GREEN}📋 ${sec_idx}. 常用管理指令 / Quick Commands${NC}"
+    printf "%b\n" "  ${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    printf "%b\n" "  • 查看服务状态:         ${BOLD}./service.sh status${NC}"
+    printf "%b\n" "  • 查看模型服务日志:     ${BOLD}./service.sh logs server${NC}"
+    printf "%b\n" "  • 查看 Trading OS 日志: ${BOLD}./service.sh logs chat${NC}"
+    printf "%b\n" "  • 停止所有服务:         ${BOLD}./service.sh stop${NC}"
+    printf "%b\n" "  • 重启所有服务:         ${BOLD}./service.sh restart${NC}"
+    printf "%b\n" "${CYAN}================================================================================${NC}"
+    printf "\n"
 }
 
 # ─── Model Selection ────────────────────────────────────────────────────────
@@ -404,6 +553,9 @@ cmd_start() {
             echo "AI Strategy Engine ready (PID: ${strategy_pid})"
         fi
     fi
+
+    # ── Summary & Access Info ──
+    print_service_summary "XMLX-VLM 服务已就绪 / Service Ready"
 }
 
 cmd_stop() {
@@ -479,57 +631,7 @@ cmd_restart() {
 }
 
 cmd_status() {
-    local server_status="stopped"
-    local server_pid=""
-    local server_model=""
-
-    if is_running "$SERVER_PID_FILE"; then
-        server_pid="$(cat "$SERVER_PID_FILE")"
-        server_status="running"
-        server_model="$(curl -sf "http://localhost:${PORT}/health" 2>/dev/null | grep -o '"loaded_model":"[^"]*"' | cut -d'"' -f4 || echo "unknown")"
-    else
-        local port_pid
-        port_pid="$(pid_of_port "$PORT")"
-        if [[ -n "$port_pid" ]]; then
-            server_pid="${port_pid}"
-            server_status="running (orphan)"
-        fi
-    fi
-
-    local chat_status="stopped"
-    local chat_pid=""
-    if is_running "$CHAT_PID_FILE"; then
-        chat_pid="$(cat "$CHAT_PID_FILE")"
-        chat_status="running"
-    else
-        local port_pid
-        port_pid="$(pid_of_port "$CHAT_PORT")"
-        if [[ -n "$port_pid" ]]; then
-            chat_pid="${port_pid}"
-            chat_status="running (orphan)"
-        fi
-    fi
-
-    local strategy_status="stopped"
-    local strategy_pid=""
-    if is_running "$STRATEGY_PID_FILE"; then
-        strategy_pid="$(cat "$STRATEGY_PID_FILE")"
-        strategy_status="running"
-    fi
-
-    echo "╔══════════════════════════════════════════╗"
-    echo "║        XMLX VLM Service Status           ║"
-    echo "╠══════════════════════════════════════════╣"
-    printf "║  Server:   %-31s ║\n" "${server_status}"
-    [[ -n "$server_pid" ]] && printf "║  PID:      %-31s ║\n" "${server_pid}"
-    [[ -n "$server_model" ]] && printf "║  Model:    %-31s ║\n" "${server_model}"
-    printf "║  Port:     %-31s ║\n" "${PORT}"
-    printf "║  Chat:     %-31s ║\n" "${chat_status}"
-    [[ -n "$chat_pid" ]] && printf "║  PID:      %-31s ║\n" "${chat_pid}"
-    printf "║  Port:     %-31s ║\n" "${CHAT_PORT}"
-    printf "║  Strategy: %-29s ║\n" "${strategy_status}"
-    [[ -n "$strategy_pid" ]] && printf "║  PID:      %-29s ║\n" "${strategy_pid}"
-    echo "╚══════════════════════════════════════════╝"
+    print_service_summary "XMLX-VLM 服务运行状态 / Service Status"
 }
 
 cmd_logs() {
