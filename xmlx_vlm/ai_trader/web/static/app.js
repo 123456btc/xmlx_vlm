@@ -1,10 +1,11 @@
-import { state, elements } from './js/core/state.js';
-import { initRouter, updateHashForTab } from './js/core/router.js';
-import { loadSessions, sendMessage, uploadFile, selectSession } from './js/modules/chat.js';
-import { checkKmsStatus, initKmsVault, unlockKmsVault, lockKmsVault, addKmsKey, deactivateKmsKey, loadKmsAuditLogs } from './js/modules/kms.js';
-import { refreshExchangeData } from './js/modules/exchange.js';
-import { loadStrategyDecisions } from './js/modules/strategy.js';
-import { startMarketLoop, startPortfolioLoop, updateWatchlist, updatePortfolio } from './js/modules/market.js';
+import { state, elements } from './js/core/state.js?v=2.0.3';
+import { initRouter, updateHashForTab } from './js/core/router.js?v=2.0.3';
+import { showToast, notify, showConfirm } from './js/core/utils.js?v=2.0.3';
+import { loadSessions, sendMessage, uploadFile, selectSession } from './js/modules/chat.js?v=2.0.3';
+import { checkKmsStatus, initKmsVault, unlockKmsVault, lockKmsVault, addKmsKey, deactivateKmsKey, loadKmsAuditLogs } from './js/modules/kms.js?v=2.0.3';
+import { refreshExchangeData } from './js/modules/exchange.js?v=2.0.3';
+import { loadStrategyDecisions } from './js/modules/strategy.js?v=2.0.3';
+import { startMarketLoop, startPortfolioLoop, updateWatchlist, updatePortfolio } from './js/modules/market.js?v=2.0.3';
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
@@ -21,8 +22,9 @@ export async function fetchConfig() {
         elements.headerModelName.textContent = config.model.split('/').pop();
         elements.headerModelName.title = config.model;
         
-        elements.headerTradingMode.textContent = config.mode;
-        elements.headerTradingMode.className = `status-val mode-badge ${config.mode.toLowerCase()}`;
+        const isLive = config.mode === 'live';
+        elements.headerTradingMode.textContent = isLive ? `LIVE (${config.label || 'Hyperliquid'})` : 'PAPER (Sim)';
+        elements.headerTradingMode.className = `status-val mode-badge ${isLive ? 'live' : 'paper'}`;
         
         elements.configRisk.textContent = config.risk_profile.toUpperCase();
         
@@ -62,16 +64,22 @@ function setupEventListeners() {
             const session = await resp.json();
             await loadSessions();
             selectSession(session.session_id);
+            notify.success('新建会话成功');
         } catch (err) {
             console.error('Failed to create session:', err);
-            alert('Failed to create session');
+            notify.error('创建会话失败: ' + (err.message || '未知错误'));
         }
     });
 
     // Clear Chat Button
     elements.btnClearChat.addEventListener('click', async () => {
         if (!state.activeSessionId) return;
-        if (!confirm('Are you sure you want to clear this session\'s messages?')) return;
+        const confirmed = await showConfirm(
+            '清空会话记录',
+            '确定要清空当前会话的全部对话与分析历史吗？<br><span style="color:var(--color-danger)">此操作无法撤回。</span>',
+            { confirmText: '清空会话', cancelText: '取消', danger: true, icon: '<i class="fa-solid fa-trash"></i>' }
+        );
+        if (!confirmed) return;
         
         try {
             await fetch(`/api/sessions/${state.activeSessionId}`, { method: 'DELETE' });
@@ -82,8 +90,10 @@ function setupEventListeners() {
                 body: JSON.stringify({ session_id: state.activeSessionId, title: elements.activeSessionTitle.textContent })
             });
             selectSession(state.activeSessionId);
+            notify.success('已清空当前会话历史');
         } catch (err) {
             console.error('Failed to clear session:', err);
+            notify.error('清空会话失败: ' + (err.message || '网络异常'));
         }
     });
 
@@ -100,22 +110,27 @@ function setupEventListeners() {
 
     // Emergency Stop
     elements.btnEmergencyStop.addEventListener('click', async () => {
-        if (!confirm('🚨 WARNING: You are triggering EMERGENCY LIQUIDATION. This will immediately flat all open positions and block new orders. Proceed?')) {
-            return;
-        }
+        const confirmed = await showConfirm(
+            '🚨 紧急熔断平仓 (Emergency Stop)',
+            '<b>警告：</b>您正在触发最高优先级的<b>急停熔断平仓</b>机制！<br><br>' +
+            '系统将立即以市价全部清仓当前所有活跃的多空持仓，撤销全部挂单，并锁定交易系统阻止新开仓。<br><br>' +
+            '<span style="color:var(--color-danger);font-weight:700;">确定要立即市价平仓并锁定停机吗？</span>',
+            { confirmText: '立即市价全平并停机', cancelText: '取消', danger: true, icon: '<i class="fa-solid fa-radiation"></i>' }
+        );
+        if (!confirmed) return;
         
         elements.btnEmergencyStop.disabled = true;
-        elements.btnEmergencyStop.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> LIQUIDATING...`;
+        elements.btnEmergencyStop.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 正在紧急平仓...`;
         
         try {
             const resp = await fetch('/api/oms/emergency_stop', { method: 'POST' });
             const res = await resp.json();
-            alert(res.message);
+            notify.success(res.message || '急停平仓指令已提交并锁定', 6000, { title: '🚨 急停已执行' });
             // Refresh portfolio instantly
             await updatePortfolio();
         } catch (err) {
             console.error('Emergency stop trigger failed:', err);
-            alert('Emergency stop action failed!');
+            notify.error('紧急平仓执行失败: ' + (err.message || '网络或接口异常'), 6000, { title: '急停失败' });
         } finally {
             elements.btnEmergencyStop.disabled = false;
             elements.btnEmergencyStop.innerHTML = `<i class="fa-solid fa-radiation"></i> EMERGENCY FLAT & STOP`;
@@ -207,14 +222,23 @@ function setupEventListeners() {
         elements.headerTradingMode.addEventListener('click', async () => {
             const isLive = elements.headerTradingMode.classList.contains('live');
             if (isLive) {
-                if (confirm("Switch to PAPER trading mode? (All live trading orders will be stopped)")) {
+                const confirmed = await showConfirm(
+                    '切换交易模式',
+                    '确定切换回 <b>模拟回测 (PAPER)</b> 模式吗？<br>实盘挂单和持仓管理将转为模拟状态。',
+                    { confirmText: '切换为模拟模式', cancelText: '取消', danger: false, icon: '<i class="fa-solid fa-flask"></i>' }
+                );
+                if (confirmed) {
                     await deactivateKmsKey();
                 }
             } else {
                 const kmsTab = document.querySelector('.tab-btn[data-tab="kms-view"]');
                 if (kmsTab) {
                     kmsTab.click();
-                    alert("To enable LIVE trading, please activate a credential in the 'API Keys & Wallet' list below.");
+                    notify.warning(
+                        "若要开启 <b>LIVE 实盘交易</b>，请在下方【API 密钥与钱包】列表中激活对应的交易凭据。",
+                        5000,
+                        { title: '需要激活实盘密钥' }
+                    );
                 }
             }
         });

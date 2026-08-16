@@ -14,13 +14,67 @@ import json
 import logging
 import math
 import os
+import struct
 import threading
 import time
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
+
+# ACDB Protocol Constants (Arctic Columnar Data Block)
+MAGIC_HEADER = b"ACDB"
+CURRENT_ACDB_VERSION = 1
+CODEC_ZLIB = 1
+
+
+class ChunkCompressionAdapter:
+    """High-performance binary compression and decompression adapter for ColumnarChunks."""
+
+    @staticmethod
+    def compress(raw_bytes: bytes, level: int = 6) -> bytes:
+        """
+        Compress raw bytes into ACDB container format:
+        [4B Magic][1B Version][1B Codec][4B UncompressedSize][4B CRC32][CompressedPayload]
+        """
+        uncompressed_size = len(raw_bytes)
+        crc = zlib.crc32(raw_bytes) & 0xFFFFFFFF
+        compressed_payload = zlib.compress(raw_bytes, level=level)
+        header = struct.pack(
+            ">4sBBII",
+            MAGIC_HEADER,
+            CURRENT_ACDB_VERSION,
+            CODEC_ZLIB,
+            uncompressed_size,
+            crc,
+        )
+        return header + compressed_payload
+
+    @staticmethod
+    def decompress(container_bytes: bytes) -> bytes:
+        """Decompress an ACDB container and verify data integrity via CRC32."""
+        if len(container_bytes) < 14:
+            raise ValueError(f"ACDB container too short: {len(container_bytes)} bytes")
+        magic, version, codec, uncompressed_size, expected_crc = struct.unpack(
+            ">4sBBII", container_bytes[:14]
+        )
+        if magic != MAGIC_HEADER:
+            raise ValueError(f"Invalid magic header: {magic!r}, expected {MAGIC_HEADER!r}")
+        if codec != CODEC_ZLIB:
+            raise ValueError(f"Unsupported codec ID: {codec}")
+
+        compressed_payload = container_bytes[14:]
+        raw_bytes = zlib.decompress(compressed_payload)
+        if len(raw_bytes) != uncompressed_size:
+            raise ValueError(
+                f"Decompressed size mismatch: got {len(raw_bytes)}, expected {uncompressed_size}"
+            )
+        actual_crc = zlib.crc32(raw_bytes) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            raise ValueError(f"CRC32 mismatch: got {actual_crc:#x}, expected {expected_crc:#x}")
+        return raw_bytes
 
 
 @dataclass
@@ -185,6 +239,18 @@ class ColumnarChunk:
         )
         return chunk
 
+    def to_compressed_bytes(self, level: int = 6) -> bytes:
+        """Serialize chunk to compressed ACDB binary format."""
+        raw_payload = json.dumps(self.to_dict()).encode("utf-8")
+        return ChunkCompressionAdapter.compress(raw_payload, level=level)
+
+    @classmethod
+    def from_compressed_bytes(cls, container_bytes: bytes) -> "ColumnarChunk":
+        """Deserialize chunk from compressed ACDB binary format."""
+        raw_payload = ChunkCompressionAdapter.decompress(container_bytes)
+        data = json.loads(raw_payload.decode("utf-8"))
+        return cls.from_dict(data)
+
 
 class SymbolPartition:
     """
@@ -202,6 +268,9 @@ class SymbolPartition:
         # timeframe -> active mutable ColumnarChunk
         self._hot_buffers: Dict[str, ColumnarChunk] = {}
         self._version_counter: int = 1
+
+        if self.storage_dir:
+            self.load_from_disk()
 
     def append(
         self,
@@ -222,7 +291,7 @@ class SymbolPartition:
                 self._hot_buffers[timeframe] = ColumnarChunk(
                     symbol=self.symbol,
                     timeframe=timeframe,
-                    chunk_id=f"{self.symbol}_{timeframe}_{int(time.time()*1000)}",
+                    chunk_id=f"{self.symbol}_{timeframe}_v{self._version_counter}_{int(time.time()*1000)}",
                     version=self._version_counter,
                 )
 
@@ -252,19 +321,68 @@ class SymbolPartition:
             timeframe,
         )
 
-        # Optional disk flush
+        # Disk flush (compressed ACDB format)
         if self.storage_dir:
             self._flush_chunk_to_disk(hot)
 
     def _flush_chunk_to_disk(self, chunk: ColumnarChunk) -> None:
+        """Flush chunk to compressed ACDB file on disk."""
         try:
             target_dir = self.storage_dir / self.symbol / chunk.timeframe
             target_dir.mkdir(parents=True, exist_ok=True)
-            chunk_file = target_dir / f"{chunk.chunk_id}.json"
-            with open(chunk_file, "w", encoding="utf-8") as f:
-                json.dump(chunk.to_dict(), f)
+            chunk_file = target_dir / f"{chunk.chunk_id}.acdb"
+            compressed_bytes = chunk.to_compressed_bytes()
+            with open(chunk_file, "wb") as f:
+                f.write(compressed_bytes)
         except Exception as exc:
-            logger.warning("Failed to flush chunk to disk: %s", exc)
+            logger.warning("Failed to flush compressed chunk to disk: %s", exc)
+
+    def load_from_disk(self) -> int:
+        """Load all compressed ACDB chunks (and legacy JSON chunks) from storage_dir."""
+        if not self.storage_dir or not self.storage_dir.exists():
+            return 0
+        
+        sym_dir = self.storage_dir / self.symbol
+        if not sym_dir.exists():
+            return 0
+
+        loaded_count = 0
+        with self._lock:
+            for tf_dir in sym_dir.iterdir():
+                if not tf_dir.is_dir():
+                    continue
+                tf = tf_dir.name
+                chunks: List[ColumnarChunk] = []
+
+                # Scan ACDB compressed files
+                for fpath in sorted(tf_dir.glob("*.acdb")):
+                    try:
+                        with open(fpath, "rb") as f:
+                            raw = f.read()
+                        chk = ColumnarChunk.from_compressed_bytes(raw)
+                        chunks.append(chk)
+                        loaded_count += 1
+                    except Exception as e:
+                        logger.warning("Failed to load compressed chunk %s: %s", fpath, e)
+
+                # Scan legacy JSON files if any
+                for fpath in sorted(tf_dir.glob("*.json")):
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            d = json.load(f)
+                        chk = ColumnarChunk.from_dict(d)
+                        chunks.append(chk)
+                        loaded_count += 1
+                    except Exception as e:
+                        logger.warning("Failed to load legacy chunk %s: %s", fpath, e)
+
+                # Sort chunks by start_ts
+                chunks.sort(key=lambda c: c.start_ts or 0)
+                if tf not in self._frozen_chunks:
+                    self._frozen_chunks[tf] = []
+                self._frozen_chunks[tf].extend(chunks)
+
+        return loaded_count
 
     def query(
         self,
@@ -309,6 +427,47 @@ class SymbolPartition:
                     merged[k] = merged[k][-limit:]
 
             return merged
+
+    def storage_stats(self) -> Dict[str, Any]:
+        """Calculate uncompressed memory bytes vs compressed ACDB bytes across all chunks."""
+        with self._lock:
+            total_rows = 0
+            total_chunks = 0
+            raw_bytes = 0
+            compressed_bytes = 0
+
+            # Measure all frozen chunks
+            for tf, chunks in self._frozen_chunks.items():
+                for c in chunks:
+                    total_chunks += 1
+                    total_rows += c.row_count
+                    json_bytes = json.dumps(c.to_dict()).encode("utf-8")
+                    c_bytes = c.to_compressed_bytes()
+                    raw_bytes += len(json_bytes)
+                    compressed_bytes += len(c_bytes)
+
+            # Measure hot buffers
+            for tf, hot in self._hot_buffers.items():
+                if hot.row_count > 0:
+                    total_chunks += 1
+                    total_rows += hot.row_count
+                    json_bytes = json.dumps(hot.to_dict()).encode("utf-8")
+                    c_bytes = hot.to_compressed_bytes()
+                    raw_bytes += len(json_bytes)
+                    compressed_bytes += len(c_bytes)
+
+            saved_bytes = max(0, raw_bytes - compressed_bytes)
+            ratio_pct = (saved_bytes / raw_bytes * 100.0) if raw_bytes > 0 else 0.0
+
+            return {
+                "symbol": self.symbol,
+                "total_chunks": total_chunks,
+                "total_rows": total_rows,
+                "raw_bytes": raw_bytes,
+                "compressed_bytes": compressed_bytes,
+                "saved_bytes": saved_bytes,
+                "compression_ratio_pct": round(ratio_pct, 2),
+            }
 
 
 class ColumnarMarketStore:
@@ -425,3 +584,34 @@ class ColumnarMarketStore:
                 else:
                     break
             return best
+
+    def storage_stats(self) -> Dict[str, Any]:
+        """Aggregate storage stats across all symbol partitions."""
+        with self._lock:
+            total_chunks = 0
+            total_rows = 0
+            raw_bytes = 0
+            compressed_bytes = 0
+            by_symbol = {}
+            for sym, part in self._partitions.items():
+                p_stat = part.storage_stats()
+                by_symbol[sym] = p_stat
+                total_chunks += p_stat["total_chunks"]
+                total_rows += p_stat["total_rows"]
+                raw_bytes += p_stat["raw_bytes"]
+                compressed_bytes += p_stat["compressed_bytes"]
+
+            saved_bytes = max(0, raw_bytes - compressed_bytes)
+            ratio_pct = (saved_bytes / raw_bytes * 100.0) if raw_bytes > 0 else 0.0
+
+            return {
+                "total_symbols": len(self._partitions),
+                "total_chunks": total_chunks,
+                "total_rows": total_rows,
+                "raw_bytes": raw_bytes,
+                "compressed_bytes": compressed_bytes,
+                "saved_bytes": saved_bytes,
+                "compression_ratio_pct": round(ratio_pct, 2),
+                "by_symbol": by_symbol,
+            }
+

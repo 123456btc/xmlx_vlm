@@ -20,7 +20,7 @@ class KlineDB:
     def __init__(self, db_path: Optional[Path] = None):
         import sys
         if "pytest" in sys.modules:
-            self.db_path = db_path or Path("/tmp/ai_trader_test.db")
+            self.db_path = db_path or (LOGS_DIR / "ai_trader_test.db")
             if db_path is None:
                 try:
                     if self.db_path.exists():

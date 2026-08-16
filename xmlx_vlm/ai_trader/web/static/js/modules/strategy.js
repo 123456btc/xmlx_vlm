@@ -1,4 +1,4 @@
-import { state, elements } from '../core/state.js';
+import { state, elements } from '../core/state.js?v=2.0.3';
 
 let strategyDecisionsCache = [];
 
@@ -12,22 +12,61 @@ export async function populateStrategySelector() {
         
         if (list && list.length > 0) {
             const currentSelected = elements.strategyIdSelect.value;
-            
             elements.strategyIdSelect.innerHTML = '';
-            list.forEach(strategyId => {
-                const option = document.createElement('option');
-                option.value = strategyId;
-                option.textContent = strategyId;
-                elements.strategyIdSelect.appendChild(option);
+            
+            // Normalize list items (handling both object format and legacy string array)
+            const normalized = list.map(item => {
+                if (typeof item === 'string') {
+                    const isLive = item.includes('hyperliquid') || (!item.includes('paper') && !item.includes('test'));
+                    const typeLabel = item.includes('hyperliquid') ? '【🟢 实盘 Hyperliquid】' : (item.includes('paper') ? '【🟡 模拟盘 Paper】' : '【策略】');
+                    return { id: item, label: `${typeLabel} ${item}`, is_live: isLive };
+                }
+                return item;
             });
             
-            // Restore previous selection if possible, otherwise default to first option
-            if (list.includes(currentSelected)) {
+            // Create option groups
+            const liveGroup = document.createElement('optgroup');
+            liveGroup.label = "🟢 实盘交易策略 (Live Strategies)";
+            
+            const paperGroup = document.createElement('optgroup');
+            paperGroup.label = "🟡 模拟盘策略 (Paper / Sim Strategies)";
+            
+            const otherGroup = document.createElement('optgroup');
+            otherGroup.label = "📁 历史/其他策略 (Historical / Other)";
+            
+            let defaultId = null;
+            
+            normalized.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.id;
+                option.textContent = item.label || item.id;
+                
+                if (item.is_live || item.id.includes('hyperliquid')) {
+                    liveGroup.appendChild(option);
+                    if (!defaultId) defaultId = item.id;
+                } else if (item.id.includes('paper')) {
+                    paperGroup.appendChild(option);
+                    if (!defaultId) defaultId = item.id;
+                } else {
+                    otherGroup.appendChild(option);
+                    if (!defaultId) defaultId = item.id;
+                }
+            });
+            
+            if (liveGroup.children.length > 0) elements.strategyIdSelect.appendChild(liveGroup);
+            if (paperGroup.children.length > 0) elements.strategyIdSelect.appendChild(paperGroup);
+            if (otherGroup.children.length > 0) elements.strategyIdSelect.appendChild(otherGroup);
+            
+            const allIds = normalized.map(i => i.id);
+            // Restore previous selection or default to trend_follow_all_hyperliquid / latest
+            if (currentSelected && allIds.includes(currentSelected)) {
                 elements.strategyIdSelect.value = currentSelected;
-            } else if (list.includes('trend_follow_btc_paper')) {
-                elements.strategyIdSelect.value = 'trend_follow_btc_paper';
+            } else if (allIds.includes('trend_follow_all_hyperliquid')) {
+                elements.strategyIdSelect.value = 'trend_follow_all_hyperliquid';
+            } else if (defaultId) {
+                elements.strategyIdSelect.value = defaultId;
             } else {
-                elements.strategyIdSelect.value = list[0];
+                elements.strategyIdSelect.value = allIds[0];
             }
         }
     } catch (e) {
@@ -41,14 +80,18 @@ export async function populateStrategySelector() {
             if (watchlist && watchlist.length > 0) {
                 const currentSelected = elements.strategyIdSelect.value;
                 elements.strategyIdSelect.innerHTML = '';
-                watchlist.forEach(item => {
-                    const coin = item.symbol.toUpperCase();
-                    const strategyId = `trend_follow_${coin.toLowerCase()}_paper`;
-                    const option = document.createElement('option');
-                    option.value = strategyId;
-                    option.textContent = `${strategyId} (${coin}/USDC)`;
-                    elements.strategyIdSelect.appendChild(option);
-                });
+                
+                const liveOpt = document.createElement('option');
+                liveOpt.value = "trend_follow_all_hyperliquid";
+                liveOpt.textContent = "【🟢 实盘】trend_follow_all_hyperliquid (Hyperliquid 全币种)";
+                elements.strategyIdSelect.appendChild(liveOpt);
+
+                const paperOpt = document.createElement('option');
+                paperOpt.value = "trend_follow_all_paper";
+                paperOpt.textContent = "【🟡 模拟盘】trend_follow_all_paper (Paper 全币种)";
+                elements.strategyIdSelect.appendChild(paperOpt);
+
+                elements.strategyIdSelect.value = "trend_follow_all_hyperliquid";
             }
         } catch (e2) {
             console.error("Watchlist fallback failed:", e2);
@@ -115,7 +158,7 @@ export async function loadStrategyDecisions() {
 
     const itemsPerPage = 5;
     try {
-        const traderId = elements.strategyIdSelect ? elements.strategyIdSelect.value : "trend_follow_btc_paper";
+        const traderId = elements.strategyIdSelect ? elements.strategyIdSelect.value : "trend_follow_all_hyperliquid";
         
         // Fetch itemsPerPage + 1 to check if there is a next page
         const resp = await fetch(`/api/strategy/decisions?trader_id=${traderId}&limit=${itemsPerPage + 1}&offset=${(state.strategyPage - 1) * itemsPerPage}`);
@@ -139,7 +182,7 @@ export async function loadStrategyDecisions() {
         }
         
         if (!displayData || displayData.length === 0) {
-            elements.strategyDecisionsList.innerHTML = '<div class="table-empty"><i class="fa-solid fa-folder-open"></i> No strategy logs found</div>';
+            elements.strategyDecisionsList.innerHTML = '<div class="table-empty"><i class="fa-solid fa-folder-open"></i> No strategy logs found for this strategy</div>';
             return;
         }
 
@@ -198,6 +241,15 @@ export async function loadStrategyDecisions() {
             elements.strategyDecisionsList.appendChild(card);
         });
 
+        // Automatically select the first decision item if available
+        if (displayData.length > 0) {
+            const firstCard = elements.strategyDecisionsList.querySelector('.audit-timeline-item');
+            if (firstCard) {
+                firstCard.classList.add('active');
+                renderDecisionDetail(displayData[0]);
+            }
+        }
+
     } catch (err) {
         console.error("Failed to load strategy decisions:", err);
         elements.strategyDecisionsList.innerHTML = `<div class="table-empty text-danger"><i class="fa-solid fa-circle-exclamation"></i> Error loading strategy logs</div>`;
@@ -210,6 +262,24 @@ export function renderDecisionDetail(item) {
     if (elements.auditEmptyState) elements.auditEmptyState.style.display = 'none';
     elements.auditReplayContent.style.display = 'block';
     
+    // Set Mode and Strategy Name badges
+    const traderId = item.trader_id || (elements.strategyIdSelect ? elements.strategyIdSelect.value : '');
+    const isLive = traderId.includes('hyperliquid') || (!traderId.includes('paper') && !traderId.includes('test'));
+    
+    if (elements.auditModeBadge) {
+        if (isLive) {
+            elements.auditModeBadge.className = 'mode-badge live';
+            elements.auditModeBadge.textContent = '🟢 LIVE 实盘';
+        } else {
+            elements.auditModeBadge.className = 'mode-badge paper';
+            elements.auditModeBadge.textContent = '🟡 PAPER 模拟';
+        }
+    }
+    
+    if (elements.auditStrategyName) {
+        elements.auditStrategyName.textContent = traderId || '-';
+    }
+
     // Set headers
     if (elements.auditCycle) elements.auditCycle.textContent = `#${item.cycle_number}`;
     if (elements.auditTimestamp) {
@@ -266,3 +336,4 @@ export function renderDecisionDetail(item) {
         }
     }
 }
+

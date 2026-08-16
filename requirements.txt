@@ -22,6 +22,7 @@ sentencepiece
 protobuf
 
 # ai_trader dependencies
+httpx>=0.24.0
 requests  # 公开交易所 REST API
 websockets>=16.0  # Hyperliquid WebSocket 实时行情
 

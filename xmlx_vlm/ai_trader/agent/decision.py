@@ -98,9 +98,11 @@ class TradeProposal:
     entry_price: Optional[Decimal] = None
 
     def __post_init__(self):
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
         if isinstance(self.action, str):
             self.action = ActionType(self.action.lower())
-        self.symbol = self.symbol.upper().strip()
+        if self.symbol:
+            self.symbol = normalize_symbol(self.symbol)
         self.size_usd = to_decimal(self.size_usd)
         self.confidence = max(0, min(100, int(self.confidence)))
         self.expected_return_pct = to_decimal(self.expected_return_pct)

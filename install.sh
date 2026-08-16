@@ -222,7 +222,7 @@ ok "All dependencies installed"
 info "Setting default environment variables..."
 
 export XMLX_VLM_API_KEY="${XMLX_VLM_API_KEY:-x123456}"
-export XMLX_VLM_MODEL="${XMLX_VLM_MODEL:-mlx-community/diffusiongemma-26B-A4B-it-4bit}"
+export XMLX_VLM_MODEL="${XMLX_VLM_MODEL:-mlx-community/Qwen3.8-27B-4bit}"
 export XMLX_VLM_PORT="${XMLX_VLM_PORT:-5118}"
 export XMLX_VLM_CHAT_PORT="${XMLX_VLM_CHAT_PORT:-5119}"
 
@@ -240,7 +240,7 @@ if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
 
 # XMLX-VLM defaults
 export XMLX_VLM_API_KEY="x123456"
-export XMLX_VLM_MODEL="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+export XMLX_VLM_MODEL="mlx-community/Qwen3.8-27B-4bit"
 export XMLX_VLM_PORT="5118"
 export XMLX_VLM_CHAT_PORT="5119"
 ENVEOF
@@ -251,11 +251,11 @@ fi
 # ─── 10. Pre-download default model (optional) ──────────────────────────────
 read -r -p "Pre-download default model (~20GB)? This avoids wait on first start. [y/N] " response </dev/tty || true
 if [[ "$response" =~ ^[Yy]$ ]]; then
-    info "Downloading default model (mlx-community/diffusiongemma-26B-A4B-it-4bit)..."
+    info "Downloading default model (mlx-community/Qwen3.8-27B-4bit)..."
     info "This will take 10-30 minutes depending on your connection."
     .venv/bin/python -c "
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id='mlx-community/diffusiongemma-26B-A4B-it-4bit', local_dir='./models/diffusiongemma-26B-A4B-it-4bit', local_dir_use_symlinks=False)
+snapshot_download(repo_id='mlx-community/Qwen3.8-27B-4bit', local_dir='./models/Qwen3.8-27B-4bit', local_dir_use_symlinks=False)
 " || warn "Model download failed (will retry on first server start)"
     ok "Model download complete"
 fi

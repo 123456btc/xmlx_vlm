@@ -368,16 +368,42 @@ def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
-def read_user_input(prompt: str) -> str:
+def read_user_input(prompt: str, timeout_sec: Optional[int] = None) -> str:
     sys.stderr.write(prompt)
     sys.stderr.flush()
+    stream = None
+    close_stream = False
     if os.path.exists("/dev/tty") and sys.platform != "win32":
         try:
-            with open("/dev/tty", "r") as tty:
-                return tty.readline().strip()
+            stream = open("/dev/tty", "r")
+            close_stream = True
         except Exception:
-            pass
-    return sys.stdin.readline().strip()
+            stream = sys.stdin
+    else:
+        stream = sys.stdin
+
+    try:
+        if timeout_sec is not None and timeout_sec > 0:
+            import select
+            try:
+                r, _, _ = select.select([stream.fileno()], [], [], timeout_sec)
+                if not r:
+                    # Timeout occurred: user did not provide input within timeout_sec
+                    eprint()
+                    return ""
+            except Exception:
+                pass
+
+        line = stream.readline()
+        if not line:
+            return ""
+        return line.strip()
+    finally:
+        if close_stream and stream:
+            try:
+                stream.close()
+            except Exception:
+                pass
 
 
 def render_interactive_menu(default_model: Optional[str] = None) -> str:
@@ -459,11 +485,23 @@ def render_interactive_menu(default_model: Optional[str] = None) -> str:
     if not sys.stdin.isatty() and not os.path.exists("/dev/tty"):
         return default_name
 
+    # Default timeout: 5 seconds (configurable via XMLX_VLM_MODEL_TIMEOUT)
+    timeout_env = os.environ.get("XMLX_VLM_MODEL_TIMEOUT", "5")
     try:
-        prompt_text = f"\n{C_BOLD}请选择要运行的模型编号 [默认: {default_idx} ({default_name})]: {C_RESET}"
-        user_input = read_user_input(prompt_text)
+        timeout_sec = int(timeout_env)
+    except ValueError:
+        timeout_sec = 5
+
+    try:
+        if timeout_sec > 0:
+            prompt_text = f"\n{C_BOLD}请选择要运行的模型编号 [默认: {default_idx} ({default_name})] ({timeout_sec}秒未输入将自动进入): {C_RESET}"
+            user_input = read_user_input(prompt_text, timeout_sec=timeout_sec)
+        else:
+            prompt_text = f"\n{C_BOLD}请选择要运行的模型编号 [默认: {default_idx} ({default_name})]: {C_RESET}"
+            user_input = read_user_input(prompt_text)
 
         if not user_input:
+            eprint(f"{C_GREEN}[✓] 自动使用默认模型: {default_name}{C_RESET}")
             return default_name
 
         if user_input == "0":

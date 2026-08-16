@@ -61,8 +61,10 @@ ENABLE_THINKING="${XMLX_VLM_ENABLE_THINKING:-true}"
 # Computer Use mode: gui | autonomous | gui_voice | autonomous_voice
 COMPUTER_MODE="${XMLX_VLM_COMPUTER_MODE:-autonomous}"
 
-# Strategy engine auto-start (default: false for interactive chat mode, --strategy to enable)
-START_STRATEGY="${XMLX_VLM_STRATEGY:-false}"
+# Strategy engine auto-start (default: true, --no-strategy to disable)
+START_STRATEGY="${XMLX_VLM_STRATEGY:-true}"
+STRATEGY_SPECIFIED="${XMLX_VLM_STRATEGY:+true}"
+STRATEGY_SPECIFIED="${STRATEGY_SPECIFIED:-false}"
 
 # Watchlist configuration
 WATCHLIST="${XMLX_VLM_WATCHLIST:-}"
@@ -280,6 +282,39 @@ select_model_interactive() {
     fi
 }
 
+select_strategy_interactive() {
+    # If explicitly specified via CLI flag or env var, skip interactive prompt
+    if [[ "$STRATEGY_SPECIFIED" == "true" ]]; then
+        return 0
+    fi
+    if [[ -t 0 ]]; then
+        printf "\n"
+        printf "%b\n" "${CYAN}================================================================================${NC}"
+        printf "%b\n" "  ${BOLD}${YELLOW}⚡ AI 策略交易引擎配置 / AI Strategy Engine Option${NC}"
+        printf "%b\n" "${CYAN}================================================================================${NC}"
+        printf "%b\n" "  ${WHITE}是否同时启动后台【5分钟自主盯盘与自动量化策略交易引擎】？${NC}"
+        printf "%b\n" "  ${DIM}(Auto-starts background multi-token scanner & decision loop for Paper/Live)${NC}"
+        printf "\n"
+        printf "%b\n" "  ${BOLD}${GREEN}1) [推荐] 启动 AI 策略引擎 (Start Strategy Engine)${NC} ${CYAN}— 自动执行 5分钟盯盘与策略开平仓${NC}"
+        printf "%b\n" "  ${BOLD}2)${NC} 仅启动 Web 控制台与大模型服务 (Web Console & Model API Only)"
+        printf "\n"
+        local strat_choice=""
+        read -r -p "  请选择 [1/2, 默认直接按回车为 1]: " strat_choice || true
+        case "$strat_choice" in
+            2|"2"|"n"|"N"|"no"|"No")
+                START_STRATEGY=false
+                printf "%b\n" "  ${YELLOW}→ 策略引擎未启动${NC} ${DIM}(可通过 ./service.sh restart --strategy 随时开启)${NC}"
+                ;;
+            *)
+                START_STRATEGY=true
+                printf "%b\n" "  ${GREEN}✓ 已启用 AI 策略引擎${NC} ${DIM}(启动后将自动执行 5分钟周期盯盘与交易)${NC}"
+                ;;
+        esac
+        printf "%b\n" "${CYAN}--------------------------------------------------------------------------------${NC}"
+        printf "\n"
+    fi
+}
+
 # ─── Commands ───────────────────────────────────────────────────────────────
 
 # Parse extra server args (anything before --chat or non-recognized flags)
@@ -337,10 +372,12 @@ parse_server_opts() {
                 ;;
             --strategy)
                 START_STRATEGY=true
+                STRATEGY_SPECIFIED=true
                 shift
                 ;;
             --no-strategy)
                 START_STRATEGY=false
+                STRATEGY_SPECIFIED=true
                 shift
                 ;;
             *)
@@ -408,6 +445,7 @@ cmd_start() {
 
     parse_server_opts "$@"
     select_model_interactive
+    select_strategy_interactive
     ensure_dirs
 
     # ── Ensure Model is Downloaded (Interactive Foreground Phase) ──

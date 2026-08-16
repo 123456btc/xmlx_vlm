@@ -17,13 +17,36 @@ if __name__ == "__main__":
 
 import requests
 
-from rich import print as rprint
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.prompt import Prompt
+try:
+    from rich import print as rprint
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+except ImportError:
+    rprint = print
+    class Console:
+        def print(self, *args, **kwargs):
+            print(*args)
+        def rule(self, *args, **kwargs):
+            pass
+    class Markdown:
+        def __init__(self, text):
+            self.text = text
+    class Panel:
+        def __init__(self, renderable, **kwargs):
+            self.renderable = renderable
+    class Prompt:
+        @staticmethod
+        def ask(prompt, **kwargs):
+            return input(prompt)
 
 from xmlx_vlm import load
+from xmlx_vlm.config import (
+    DEFAULT_API_KEY,
+    DEFAULT_MODEL,
+    DEFAULT_SERVER_URL,
+)
 from xmlx_vlm.generate import (
     DEFAULT_KV_GROUP_SIZE,
     DEFAULT_KV_QUANT_SCHEME,
@@ -33,6 +56,8 @@ from xmlx_vlm.generate import (
     DEFAULT_TEMPERATURE,
     DEFAULT_THINKING_END_TOKEN,
     DEFAULT_THINKING_START_TOKEN,
+    DEFAULT_TOP_P,
+    GenerationResult,
     PromptCacheState,
     stream_generate,
 )
@@ -62,11 +87,11 @@ def _encode_image_to_base64(image_path: str) -> str:
 class MLXVisionChat:
     def __init__(
         self,
-        model_path: str = "mlx-community/diffusiongemma-26B-A4B-it-4bit",
+        model_path: str = DEFAULT_MODEL,
         temperature: float = 0.7,
         max_tokens: int = 1000,
         verbose: bool = False,
-        server_url: Optional[str] = "http://localhost:5118",
+        server_url: Optional[str] = DEFAULT_SERVER_URL,
         api_key: Optional[str] = None,
         local_only: bool = False,
         **kwargs,
@@ -356,7 +381,7 @@ def main():
     parser = argparse.ArgumentParser(description="MLX Vision Chat CLI")
     parser.add_argument(
         "--model",
-        default="mlx-community/diffusiongemma-26B-A4B-it-4bit",
+        default=DEFAULT_MODEL,
         help="Path to the model or model identifier",
     )
     parser.add_argument("--verbose", action="store_false", help="Enable verbose output")

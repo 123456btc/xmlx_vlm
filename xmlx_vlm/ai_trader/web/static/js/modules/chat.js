@@ -1,6 +1,6 @@
-import { state, elements } from '../core/state.js';
-import { scrollToBottom, escapeHtml, formatBytes, showTypingIndicator, hideTypingIndicator } from '../core/utils.js';
-import { updatePortfolio } from './market.js';
+import { state, elements } from '../core/state.js?v=2.0.2';
+import { scrollToBottom, escapeHtml, formatBytes, showTypingIndicator, hideTypingIndicator, showToast, notify, showConfirm } from '../core/utils.js?v=2.0.2';
+import { updatePortfolio } from './market.js?v=2.0.2';
 
 // Load Session List
 export async function loadSessions(autoCreate = true) {
@@ -696,13 +696,14 @@ export async function uploadFile(file) {
         if (result.status === 'success') {
             state.stagedAttachmentsList.push(result);
             renderStagedAttachments();
+            notify.success(`已添加附件: ${file.name}`);
         } else {
-            alert('Upload failed: ' + (result.message || 'unknown error'));
+            notify.error('附件上传失败: ' + (result.message || '未知错误'));
         }
     } catch (err) {
         console.error('File upload failed:', err);
         hideTypingIndicator();
-        alert('Upload failed');
+        notify.error('上传附件异常: ' + err.message);
     }
 }
 

@@ -20,13 +20,13 @@ DEFAULT_SYSTEM_PROMPT = """你是 AI Trader，一位专业的合约高频与量�
   {
     "action": "open_long",
     "symbol": "BTC/USDC",
-    "position_size_usd": 500,
-    "leverage": 5,
+    "position_size_usd": 15,
+    "leverage": 3,
     "price": null,
     "stop_loss": 62000,
     "take_profit": 72000,
-    "confidence": 78,
-    "reasoning": "基于ATR计算仓位，1h EMA金叉，CVD 1h流入，采用 pyramid 盈利加仓机制"
+    "confidence": 75,
+    "reasoning": "基于账户比例计算仓位，1h EMA金叉，CVD 1h流入，止损设在2倍ATR"
   }
 ]
 
@@ -38,29 +38,29 @@ action 可选值：
 
 核心策略管理与风控约束（必须严格遵守）：
 
-1. 动态仓位管理算法（Position Sizing Algorithms）：
-   - 基于风险系数：单笔开仓最大承担风险不超过账户总权益的 1%-2%。仓位名义价值 = (账户权益 * 风险系数) / (止损距离比例)。
-   - 基于波动率（ATR）：止损距离优先采用 1.5 - 2.5 倍 ATR(14)。仓位名义价值 = (账户权益 * 风险系数) / (ATR * 乘数)。
-   - 凯利公式（Kelly Criterion）调节：结合历史胜率 W 和盈亏比 R 计算 f* = W - (1-W)/R。采用四分之一凯利（0.25 * f*）微调，单笔名义价值绝对上限为账户权益的 20%。
+1. 账户比例化仓位管理原则（Account Percentage Sizing）：
+   - 全资金比例换算：所有开仓、平仓、止盈、止损均严格按当前【账户总权益】的比例（百分比）动态计算。无论账户规模是 $30、$300 还是 $30,000，均按账户比例换算并执行，绝对不要因账户本金小而拒绝开仓！
+   - 开仓名义价值计算：
+     * 单笔开仓占用保证金比例：通常为账户总权益的 15% ~ 35%（结合当前行情置信度与可用保证金）。
+     * 仓位名义价值（position_size_usd） = 占用保证金 * 杠杆倍数（leverage 推荐 2x~5x）。
+     * 小微账户（如 $30~$100 USDC）兼容：交易所单笔最低名义价值门槛通常约为 $10~$12 USD。对于小额账户（如 $30），按 20%~30% 保证金配合 2x~3x 杠杆，名义价值即为 $12~$25 USD，完全满足且应正常开仓。
+   - 止损止盈比例与价格计算：
+     * 止损比例（Stop Loss）：按价格的 1.5%~4.0% 或 1.5~2.5 倍 ATR(14) 动态计算。多单 stop_loss = mark_price * (1 - 止损比例)；空单 stop_loss = mark_price * (1 + 止损比例)。
+     * 止盈比例（Take Profit）：按照至少 1:1.5 到 1:3 的盈亏比计算目标价。多单 take_profit = mark_price * (1 + 止盈比例)；空单 take_profit = mark_price * (1 - 止盈比例)。
 
-2. 风控算法（Risk Control Algorithms）：
-   - 强制止损止盈：任何开仓/加仓决策必须带有明确的 stop_loss 与 take_profit。盈亏比（Risk-to-Reward Ratio）必须 >= 1.5，推荐 >= 2.0。
-   - 保证金安全边界：整体已用保证金使用率（Margin Utilization）上限为 50%。一旦超过 50%，禁止任何新增开仓/加仓（仅允许 wait/hold/close）。
-   - 账户最大回撤控制：当历史统计显示最大回撤达到 5% 时，停止一切新开仓，只允许减仓、平仓或观望。
-   - 盈亏保护（保本机制）：当持仓未实现浮盈达到预设目标的一半时，必须提示将止损位移动至开仓均价（保本损）。
+2. 风控与持仓主动治理（Risk Control & Position Pruning）：
+   - 浮亏持仓果断止损：若当前持仓处于大幅浮亏（如浮亏 > 10%~20% 且趋势已破位），必须果断下达 close_long / close_short 止损平仓指令，释放保证金，防止回撤扩大。
+   - 浮盈保本与止盈：当持仓浮盈达到目标的一半以上时，提示移动止损至入场均价（保本损）或分批止盈减仓。
+   - 保证金安全边界：整体已用保证金使用率上限为 50%。一旦超过 50%，禁止新增开仓（仅允许 wait/hold/close）。
 
-3. 加减仓与分批管理算法（Scaling In/Out Algorithms）：
-   - 盈利金字塔加仓（Pyramid Adding）：仅在当前持仓盈利时允许同向加仓；加仓金额必须小于前一次开仓金额（如前一次的 50%）。亏损持仓绝对不许补仓（逆势不加仓）。
-   - 分批减仓锁盈（Scaling Out）：当价格到达关键阻力/支撑位，或趋势出现减弱信号时，进行部分平仓以锁定利润。
+3. 加减仓与分批管理（Scaling In/Out）：
+   - 盈利金字塔加仓（Pyramid Adding）：仅在当前持仓盈利且趋势增强时允许同向加仓；亏损持仓绝对不许补仓（逆势不加仓）。
    - 平仓与减仓执行：
      - 若要完全平仓，action 设为 close_long / close_short，将 position_size_usd 设为 null 或等于/大于当前持仓名义价值。
-     - 若要部分减仓，action 设为 close_long / close_short，将 position_size_usd 设为希望减仓的名义价值（USD），系统会执行部分平仓。
+     - 若要部分减仓，action 设为 close_long / close_short，将 position_size_usd 设为希望减仓的名义价值（USD）。
 
-4. 交易频率与心理学自律（Anti-Overtrading & Frequency Discipline）：
-   - 优秀量化交易员标准：日均 2-4 笔高质量交易（≈ 0.1-0.2 笔/小时）。
-   - 严禁过度交易（Overtrading）：单小时内 > 2 笔开仓属于严重刷单与过拟合行为，会导致高额手续费磨损与胜率骤降。
-   - 单笔持仓周期意识：优质趋势单的期望持仓时间应在 45-90 分钟以上；持仓小于 15 分钟且未触及硬止损的频繁调仓属于冲动杂音行为（Too Impulsive）。
-   - 顺势与再入场冷静期：若前一笔交易被止损平仓，禁止在同周期内立即报复性追单，必须等待盘口出现新的确认信号或保持冷静期。
+4. 交易执行自律：
+   - 当技术指标与盘口（如 RSI 处于动量区间、CVD 明显流入/流出、量价共振）出现较好胜率机会时，果断按账户比例下发开仓指令，严禁因账户本金规模较小而过度畏缩观望。
 
 价格口径：以 mark_price 为基准。"""
 
@@ -208,6 +208,23 @@ class PromptBuilder:
                 )
             if summary.cvd_1h is not None:
                 lines.append(f"  CVD_1h={summary.cvd_1h:,.2f}, CVD_4h={summary.cvd_4h}")
+            # 6 大高阶币圈量化因子输出
+            factor_tags = []
+            if getattr(summary, "is_squeezed", False):
+                factor_tags.append("布林带极度挤压(准备单边爆发)")
+            if getattr(summary, "pinbar_type", "none") != "none":
+                factor_tags.append(f"清算插针({summary.pinbar_type})")
+            if getattr(summary, "cvd_divergence", "neutral") != "neutral":
+                factor_tags.append(f"CVD背离({summary.cvd_divergence})")
+            if getattr(summary, "oi_regime", "neutral") != "neutral":
+                factor_tags.append(f"OI共振({summary.oi_regime})")
+            if getattr(summary, "funding_zscore", None) is not None and abs(summary.funding_zscore) >= 2.0:
+                factor_tags.append(f"费率极端偏离(Z={summary.funding_zscore:.2f})")
+            if getattr(summary, "candle_efficiency", None) is not None:
+                factor_tags.append(f"K线推进效率={summary.candle_efficiency:.2f}")
+
+            if factor_tags:
+                lines.append(f"  高阶量化因子: {', '.join(factor_tags)}")
         return "\n".join(lines)
 
     def _stats_section(self, context: TradingContext) -> str:

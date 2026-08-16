@@ -1,5 +1,6 @@
-import { elements } from '../core/state.js';
-import { updatePortfolio } from './market.js';
+import { elements } from '../core/state.js?v=2.0.2';
+import { updatePortfolio } from './market.js?v=2.0.2';
+import { showToast, notify, showConfirm } from '../core/utils.js?v=2.0.2';
 
 function formatPrice(val) {
     const p = parseFloat(val);
@@ -197,6 +198,13 @@ export async function refreshExchangeData() {
 }
 
 export async function cancelExchangeOrder(orderId) {
+    const confirmed = await showConfirm(
+        '撤销挂单',
+        `确定要撤销订单 <code>${orderId}</code> 吗？`,
+        { confirmText: '撤销挂单', cancelText: '取消', danger: true, icon: '<i class="fa-solid fa-ban"></i>' }
+    );
+    if (!confirmed) return;
+
     try {
         const selectedWallet = elements.exchangeWalletSelect ? elements.exchangeWalletSelect.value : "";
         const resp = await fetch('/api/kms/exchange/cancel_order', {
@@ -205,17 +213,26 @@ export async function cancelExchangeOrder(orderId) {
             body: JSON.stringify({ order_id: orderId, wallet: selectedWallet })
         });
         if (resp.ok) {
+            notify.success(`订单 ${orderId} 撤销成功`);
             await refreshExchangeData();
         } else {
             const res = await resp.json();
-            alert("Cancel order failed: " + res.detail);
+            notify.error("撤单失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Cancel exchange order failed:", err);
+        notify.error("撤单请求异常: " + err.message);
     }
 }
 
 export async function closeExchangePosition(symbol) {
+    const confirmed = await showConfirm(
+        '市价平仓',
+        `确定要市价平掉 <b>${symbol}</b> 的全部持仓吗？<br>系统将以当前最新盘口市价挂单减仓。`,
+        { confirmText: '立即市价平仓', cancelText: '取消', danger: true, icon: '<i class="fa-solid fa-circle-xmark"></i>' }
+    );
+    if (!confirmed) return;
+
     try {
         const selectedWallet = elements.exchangeWalletSelect ? elements.exchangeWalletSelect.value : "";
         const resp = await fetch('/api/kms/exchange/close_position', {
@@ -224,12 +241,14 @@ export async function closeExchangePosition(symbol) {
             body: JSON.stringify({ symbol, wallet: selectedWallet })
         });
         if (resp.ok) {
+            notify.success(`已提交 ${symbol} 平仓指令`);
             await refreshExchangeData();
         } else {
             const res = await resp.json();
-            alert("Close position failed: " + res.detail);
+            notify.error("平仓失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Close position failed:", err);
+        notify.error("平仓请求异常: " + err.message);
     }
 }

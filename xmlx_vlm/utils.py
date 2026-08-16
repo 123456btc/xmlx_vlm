@@ -176,6 +176,26 @@ def get_model_path(
     if not model_path.exists():
         if revision is None:
             revision = "main"
+        if not force_download:
+            try:
+                return Path(
+                    snapshot_download(
+                        repo_id=path_or_hf_repo,
+                        revision=revision,
+                        allow_patterns=[
+                            "*.json",
+                            "*.safetensors",
+                            "*.py",
+                            "*.model",
+                            "*.tiktoken",
+                            "*.txt",
+                            "*.jinja",
+                        ],
+                        local_files_only=True,
+                    )
+                )
+            except Exception:
+                pass
         try:
             model_path = Path(
                 snapshot_download(

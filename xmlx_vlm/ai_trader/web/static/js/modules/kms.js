@@ -1,7 +1,7 @@
-import { elements } from '../core/state.js';
-import { escapeHtml, formatBytes } from '../core/utils.js';
-import { refreshExchangeData } from './exchange.js';
-import { fetchConfig } from '../../app.js';
+import { elements } from '../core/state.js?v=2.0.2';
+import { escapeHtml, formatBytes, showToast, notify, showConfirm } from '../core/utils.js?v=2.0.2';
+import { refreshExchangeData } from './exchange.js?v=2.0.2';
+import { fetchConfig } from '../../app.js?v=2.0.2';
 
 export async function checkKmsStatus() {
     try {
@@ -42,11 +42,11 @@ export async function initKmsVault() {
     const confirm = elements.kmsInitPwdConfirm.value;
     
     if (!password || password.length < 6) {
-        alert("Password must be at least 6 characters long.");
+        notify.warning("主密码长度至少需要 6 个字符。");
         return;
     }
     if (password !== confirm) {
-        alert("Passwords do not match.");
+        notify.warning("两次输入的密码不一致。");
         return;
     }
     
@@ -58,24 +58,24 @@ export async function initKmsVault() {
         });
         const res = await resp.json();
         if (resp.ok) {
-            alert("Secure Vault successfully initialized!");
+            notify.success("安全保险库已成功初始化！");
             elements.kmsInitPwd.value = '';
             elements.kmsInitPwdConfirm.value = '';
             await checkKmsStatus();
             await loadKmsAuditLogs();
         } else {
-            alert("Initialization failed: " + res.detail);
+            notify.error("初始化失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Init vault failed:", err);
-        alert("Init vault failed");
+        notify.error("初始化保险库请求异常: " + err.message);
     }
 }
 
 export async function unlockKmsVault() {
     const password = elements.kmsMasterPwd.value;
     if (!password) {
-        alert("Please enter your master password.");
+        notify.warning("请输入主密码解锁保险库。");
         return;
     }
     
@@ -89,17 +89,18 @@ export async function unlockKmsVault() {
         elements.kmsMasterPwd.value = '';
         
         if (resp.ok) {
+            notify.success("保险库已成功解锁");
             await checkKmsStatus();
             await loadKmsAuditLogs();
             
             // Re-fetch system config to update headers trading mode
             await fetchConfig();
         } else {
-            alert("Unlock failed: " + res.detail);
+            notify.error("解锁失败: " + (res.detail || "密码错误"));
         }
     } catch (err) {
         console.error("Unlock vault failed:", err);
-        alert("Unlock vault failed");
+        notify.error("解锁保险库请求异常: " + err.message);
     }
 }
 
@@ -250,7 +251,7 @@ export async function addKmsKey() {
     const password = elements.kmsReverifyPwd.value || 'system_default';
     
     if (!label || !wallet_address || !private_key || !password) {
-        alert("Please fill in all fields to authorize encryption.");
+        notify.warning("请完整填写标签、钱包地址和私钥以授权加密。");
         return;
     }
     
@@ -265,50 +266,69 @@ export async function addKmsKey() {
         elements.kmsReverifyPwd.value = 'system_default';
         
         if (resp.ok) {
-            alert("Key encrypted and stored successfully!");
+            notify.success("密钥凭据已安全加密并存储！");
             elements.kmsNewLabel.value = '';
             elements.kmsNewAddress.value = '';
             elements.kmsNewKey.value = '';
             await checkKmsStatus();
             await loadKmsAuditLogs();
         } else {
-            alert("Failed to save key: " + res.detail);
+            notify.error("保存密钥失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Add key failed:", err);
-        alert("Add key failed");
+        notify.error("添加密钥请求异常: " + err.message);
     }
 }
 
 export async function deleteKmsKey(keyId) {
+    const confirmed = await showConfirm(
+        '删除 API 密钥凭证',
+        '确定要删除该密钥凭证吗？<br><span style="color:var(--color-danger)">删除后无法恢复，若该密钥正在用于实盘交易将会中断。</span>',
+        { confirmText: '确认删除', cancelText: '取消', danger: true, icon: '<i class="fa-solid fa-key"></i>' }
+    );
+    if (!confirmed) return;
+
     try {
         const resp = await fetch(`/api/kms/keys/${keyId}`, { method: 'DELETE' });
         if (resp.ok) {
+            notify.success("密钥凭证已成功删除");
             await checkKmsStatus();
             await loadKmsAuditLogs();
             await fetchConfig();
         } else {
             const res = await resp.json();
-            alert("Failed to delete: " + res.detail);
+            notify.error("删除密钥失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Delete key failed:", err);
+        notify.error("删除密钥请求异常: " + err.message);
     }
 }
 
 export async function activateKmsKey(keyId) {
+    const confirmed = await showConfirm(
+        '激活实盘交易密钥',
+        '确定将此钱包密钥设置为当前 <b>实盘交易执行凭据</b> 吗？<br><br>' +
+        '系统将自动切换为 <b style="color:var(--color-danger);">LIVE 实盘交易模式</b>，AI Trader 发出的下单指令将真实扣费并提交到链上/交易所。',
+        { confirmText: '激活并开启实盘', cancelText: '取消', danger: false, icon: '<i class="fa-solid fa-bolt"></i>' }
+    );
+    if (!confirmed) return;
+
     try {
         const resp = await fetch(`/api/kms/keys/${keyId}/activate`, { method: 'POST' });
         if (resp.ok) {
+            notify.success("已激活实盘执行凭证，系统已就绪！", 5000, { title: '实盘模式已启动' });
             await checkKmsStatus();
             await loadKmsAuditLogs();
             await fetchConfig();
         } else {
             const res = await resp.json();
-            alert("Activation failed: " + res.detail);
+            notify.error("激活失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Activate key failed:", err);
+        notify.error("激活密钥请求异常: " + err.message);
     }
 }
 
@@ -316,15 +336,17 @@ export async function deactivateKmsKey() {
     try {
         const resp = await fetch('/api/kms/keys/deactivate', { method: 'POST' });
         if (resp.ok) {
+            notify.info("已停用实盘凭证，系统已安全切回模拟 (PAPER) 模式");
             await checkKmsStatus();
             await loadKmsAuditLogs();
             await fetchConfig();
         } else {
             const res = await resp.json();
-            alert("Deactivation failed: " + res.detail);
+            notify.error("停用失败: " + (res.detail || "未知错误"));
         }
     } catch (err) {
         console.error("Deactivate key failed:", err);
+        notify.error("停用密钥请求异常: " + err.message);
     }
 }
 

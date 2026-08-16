@@ -27,6 +27,16 @@ class Fill:
     timestamp_ms: int = field(default_factory=utc_now_ms)
     raw: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
+        if self.symbol:
+            self.symbol = normalize_symbol(self.symbol)
+        if isinstance(self.side, str):
+            self.side = OrderSide(self.side.lower())
+        self.qty = to_decimal(self.qty)
+        self.price = to_decimal(self.price)
+        self.fee = to_decimal(self.fee)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "fill_id": self.fill_id,
@@ -76,6 +86,9 @@ class Order:
     algo_params: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
+        if self.symbol:
+            self.symbol = normalize_symbol(self.symbol)
         self.qty = to_decimal(self.qty)
         self.remaining_qty = self.qty - self.filled_qty
         if self.price is not None:
@@ -212,12 +225,35 @@ _STATE_TRANSITIONS = {
         OrderState.SUBMITTED,
         OrderState.SENT,
         OrderState.ACKNOWLEDGED,
+        OrderState.FILLED,
         OrderState.REJECTED,
         OrderState.CANCELLED,
     },
-    OrderState.PRE_TRADE_OK: {OrderState.SENT, OrderState.SUBMITTED, OrderState.REJECTED, OrderState.CANCELLED},
-    OrderState.SENT: {OrderState.SUBMITTED, OrderState.ACKNOWLEDGED, OrderState.REJECTED, OrderState.CANCELLED},
-    OrderState.SUBMITTED: {OrderState.ACKNOWLEDGED, OrderState.REJECTED, OrderState.CANCELLED},
+    OrderState.PRE_TRADE_OK: {
+        OrderState.SENT,
+        OrderState.SUBMITTED,
+        OrderState.ACKNOWLEDGED,
+        OrderState.FILLED,
+        OrderState.REJECTED,
+        OrderState.CANCELLED,
+    },
+    OrderState.SENT: {
+        OrderState.SUBMITTED,
+        OrderState.ACKNOWLEDGED,
+        OrderState.FILLED,
+        OrderState.PARTIAL_FILLED,
+        OrderState.REJECTED,
+        OrderState.CANCELLED,
+        OrderState.EXPIRED,
+    },
+    OrderState.SUBMITTED: {
+        OrderState.ACKNOWLEDGED,
+        OrderState.FILLED,
+        OrderState.PARTIAL_FILLED,
+        OrderState.REJECTED,
+        OrderState.CANCELLED,
+        OrderState.EXPIRED,
+    },
     OrderState.ACKNOWLEDGED: {
         OrderState.PARTIAL_FILLED,
         OrderState.FILLED,

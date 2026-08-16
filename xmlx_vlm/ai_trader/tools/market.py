@@ -445,14 +445,9 @@ class MarketDataTool:
         self._oi_tracker = _OITracker()
 
     def _coin(self, symbol: str) -> str:
-        """从 BTC/USDC、BTCUSDT 等格式提取币种代码 BTC."""
-        symbol = symbol.strip().upper()
-        if "/" in symbol:
-            return symbol.split("/")[0]
-        for quote in ("USDT", "USDC", "USD", "BTC", "ETH", "EUR", "GBP", "JPY"):
-            if symbol.endswith(quote):
-                return symbol[: -len(quote)]
-        return symbol
+        """从 BTC/USDC、BTCUSDT 等格式提取币种代码 BTC (使用统一的 extract_base_coin SSOT)."""
+        from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+        return extract_base_coin(symbol)
 
     def _hl_post(self, payload: Dict[str, Any]) -> Any:
         resp = requests.post(_HYPERLIQUID_API, json=payload, timeout=20)
@@ -462,7 +457,8 @@ class MarketDataTool:
     def _find_asset_ctx(self, coin: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         meta, ctxs = self._hl_post({"type": "metaAndAssetCtxs"})
         for idx, asset in enumerate(meta.get("universe", [])):
-            if asset.get("name") == coin:
+            asset_name = asset.get("name", "")
+            if asset_name == coin or asset_name.upper() == coin.upper():
                 return asset, ctxs[idx]
         raise ValueError(f"Hyperliquid 上未找到币种: {coin}")
 

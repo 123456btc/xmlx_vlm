@@ -15,14 +15,18 @@ LOGS_DIR = BASE_DIR / "logs"
 for d in (DATA_DIR, LOGS_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-# ── 本地推理服务配置（与 service.sh 保持一致）──
-DEFAULT_MODEL = os.getenv(
-    "XMLX_VLM_MODEL", "mlx-community/diffusiongemma-26B-A4B-it-4bit"
+# ── 本地推理服务配置（SSOT：直接继承 xmlx_vlm.config）──
+from xmlx_vlm.config import (
+    DEFAULT_API_KEY,
+    DEFAULT_CHAT_PORT,
+    DEFAULT_MODEL,
+    DEFAULT_SERVER_HOST,
+    DEFAULT_SERVER_PORT,
+    DEFAULT_SERVER_URL,
 )
-DEFAULT_PORT = int(os.getenv("XMLX_VLM_PORT", "5118"))
-DEFAULT_CHAT_PORT = int(os.getenv("XMLX_VLM_CHAT_PORT", "5119"))
-DEFAULT_API_KEY = os.getenv("XMLX_VLM_API_KEY", "x123456")
-DEFAULT_SERVER_URL = f"http://localhost:{DEFAULT_PORT}"
+
+# 兼容别名
+DEFAULT_PORT = DEFAULT_SERVER_PORT
 
 # 默认交易所（统一使用 Hyperliquid）
 DEFAULT_EXCHANGE = "hyperliquid"

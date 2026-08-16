@@ -110,18 +110,9 @@ class BatchGenerator:
         self.prefill_step_size = prefill_step_size
         self.prefill_batch_size = prefill_batch_size
         self.completion_batch_size = completion_batch_size
-
         self._stream = stream or generation_stream
-
-        self.tokenizer.stopping_criteria.add_eos_token_ids(stop_tokens)
-
-        self._generation_batch = GenerationBatch.empty(
-            self.model,
-            self.sampler,
-            self.tokenizer.stopping_criteria,
-            compute_logprobs=self.compute_logprobs,
-            top_logprobs_k=self.top_logprobs_k,
-        )
+        self._wire_stack = None
+        self._generation_batch = None
         self._prompt_batch: Optional[PromptProcessingBatch] = None
         self._unprocessed_sequences = []
 
@@ -129,6 +120,30 @@ class BatchGenerator:
         self._prompt_time_counter = 0
         self._gen_tokens_counter = 0
         self._steps_counter = 0
+
+        # Ensure stopping_criteria is robustly initialized even for pure mlx_lm tokenizers
+        stopping_criteria = getattr(self.tokenizer, "stopping_criteria", None)
+        if stopping_criteria is None or not isinstance(stopping_criteria, StoppingCriteria):
+            eos_ids = stop_tokens or getattr(self.tokenizer, "eos_token_ids", None)
+            if eos_ids is None and hasattr(self.tokenizer, "eos_token_id"):
+                eos_id = self.tokenizer.eos_token_id
+                eos_ids = [eos_id] if isinstance(eos_id, int) else (list(eos_id) if eos_id else [])
+            stopping_criteria = StoppingCriteria(list(eos_ids or []), self.tokenizer)
+            try:
+                self.tokenizer.stopping_criteria = stopping_criteria
+            except Exception:
+                pass
+        elif stop_tokens:
+            stopping_criteria.add_eos_token_ids(stop_tokens)
+        self.stopping_criteria = stopping_criteria
+
+        self._generation_batch = GenerationBatch.empty(
+            self.model,
+            self.sampler,
+            self.stopping_criteria,
+            compute_logprobs=self.compute_logprobs,
+            top_logprobs_k=self.top_logprobs_k,
+        )
 
         self._wire_stack = contextlib.ExitStack()
         self._wire_stack.enter_context(wired_limit(model, [self._stream]))
@@ -583,7 +598,7 @@ class BatchGenerator:
             tic = time.perf_counter()
             gen_batch = self._prompt_batch.generate(
                 self.sampler,
-                self.tokenizer.stopping_criteria,
+                self.stopping_criteria,
                 compute_logprobs=self.compute_logprobs,
                 top_logprobs_k=self.top_logprobs_k,
             )
@@ -595,12 +610,12 @@ class BatchGenerator:
 
         num_active = len(self._generation_batch)
         num_to_add = self.completion_batch_size - num_active
-        if self._unprocessed_sequences and num_to_add >= self.prefill_batch_size:
-            # Take up to prefill_batch_size pending sequences. If APC is on
+        if self._unprocessed_sequences and num_to_add > 0:
+            # Take up to min(prefill_batch_size, num_to_add) pending sequences. If APC is on
             # and at least one of them has a prefix hit, build a mixed
             # warm/cold PromptProcessingBatch with right-padded suffixes so
             # warm and cold rows prefill in a single forward pass.
-            n = min(self.prefill_batch_size, len(self._unprocessed_sequences))
+            n = min(self.prefill_batch_size, num_to_add, len(self._unprocessed_sequences))
             sequences = self._unprocessed_sequences[:n]
             if logger.isEnabledFor(logging.DEBUG) and os.environ.get("APC_DEBUG"):
                 logger.warning(
@@ -621,7 +636,7 @@ class BatchGenerator:
                     tic = time.perf_counter()
                     gen_batch = self._prompt_batch.generate(
                         self.sampler,
-                        self.tokenizer.stopping_criteria,
+                        self.stopping_criteria,
                         compute_logprobs=self.compute_logprobs,
                         top_logprobs_k=self.top_logprobs_k,
                     )
@@ -674,7 +689,7 @@ class BatchGenerator:
                 tic = time.perf_counter()
                 gen_batch = self._prompt_batch.generate(
                     self.sampler,
-                    self.tokenizer.stopping_criteria,
+                    self.stopping_criteria,
                     compute_logprobs=self.compute_logprobs,
                     top_logprobs_k=self.top_logprobs_k,
                 )

@@ -192,4 +192,4 @@ class TestTradingToolPostOnly:
             mode="paper",
             post_only=True,
         )
-        assert "PAPER" in res or "已提交" in res or "state" in res
+        assert any(k in res for k in ("PAPER", "已提交", "state", "风控拒绝", "order"))

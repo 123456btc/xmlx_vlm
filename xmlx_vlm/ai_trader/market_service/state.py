@@ -13,7 +13,20 @@ from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional
 
 from .columnar_store import ColumnarMarketStore
-from .indicators import adx, atr, ema, rsi, volume_profile
+from .indicators import (
+    adx,
+    atr,
+    bollinger_bands,
+    bollinger_squeeze,
+    candle_efficiency,
+    cvd_price_divergence,
+    ema,
+    funding_rate_zscore,
+    oi_price_regime,
+    pinbar_liquidity_sweep,
+    rsi,
+    volume_profile,
+)
 from .kline_db import KlineDB
 from .models import (
     Bar,
@@ -250,6 +263,51 @@ class SymbolState:
         adx14, plus_di, minus_di = adx(ohlcv, 14)
         vp = volume_profile(ohlcv, bins=24)
 
+        # 6 大币圈实战高阶因子计算
+        # 1. 爆仓清算针与插针吸收
+        pinbar_info = pinbar_liquidity_sweep(ohlcv)
+
+        # 2. 布林带与挤压突破
+        bb_info = bollinger_bands(closes, 20, 2.0)
+        # 计算过去多根 K 线的带宽历史以求挤压分位数
+        bw_hist = []
+        if len(closes) >= 30:
+            step = max(1, len(closes) // 50)
+            for i in range(20, len(closes) + 1, step):
+                bw_hist.append(bollinger_bands(closes[:i], 20, 2.0)["bandwidth"])
+        squeeze_info = bollinger_squeeze(bw_hist if bw_hist else [bb_info["bandwidth"]])
+
+        # 3. K 线实体推进效率比
+        eff_info = candle_efficiency(ohlcv)
+
+        # 4. CVD 与价格背离 (若有 CVD 历史)
+        recent_trades = self.recent_trades(500)
+        cvd_vals = []
+        if recent_trades:
+            # 简易窗口 CVD
+            cum = 0.0
+            for t in recent_trades:
+                val = t.price * t.size
+                cum += val if t.side.lower() == "buy" else -val
+                cvd_vals.append(cum)
+            trade_pxs = [t.price for t in recent_trades]
+            cvd_div = cvd_price_divergence(trade_pxs, cvd_vals, lookback=30)
+        else:
+            cvd_div = {"divergence_type": "neutral", "correlation": 0.0, "is_divergence": False}
+
+        # 5. OI 价格共振 4 象限
+        oi_snaps = self.recent_oi(100)
+        if len(oi_snaps) >= 4 and len(closes) >= 4:
+            oi_vals = [o.open_interest for o in oi_snaps]
+            oi_pxs = [o.mark_price if o.mark_price > 0 else closes[-1] for o in oi_snaps]
+            oi_reg = oi_price_regime(oi_pxs, oi_vals, lookback=min(30, len(oi_vals)))
+        else:
+            oi_reg = {"regime": "neutral", "regime_desc": "中性平衡", "price_change_pct": 0.0, "oi_change_pct": 0.0}
+
+        # 6. 资金费率 Z-Score 与拥挤度
+        funding_rates = [f.rate for f in self.recent_funding(100)]
+        funding_z = funding_rate_zscore(funding_rates)
+
         latest = closes[-1]
         return {
             "ema20": ema20[-1] if ema20 else None,
@@ -263,6 +321,26 @@ class SymbolState:
             "poc": vp.get("poc"),
             "vah": vp.get("vah"),
             "val": vp.get("val"),
+            # 6 大高阶因子输出
+            "bb_upper": bb_info.get("upper"),
+            "bb_middle": bb_info.get("middle"),
+            "bb_lower": bb_info.get("lower"),
+            "bb_bandwidth": bb_info.get("bandwidth"),
+            "bb_percent_b": bb_info.get("percent_b"),
+            "squeeze_score": squeeze_info.get("squeeze_score"),
+            "is_squeezed": squeeze_info.get("is_squeezed", False),
+            "candle_efficiency": eff_info.get("efficiency"),
+            "is_high_efficiency": eff_info.get("is_high_efficiency", False),
+            "is_fakeout_risk": eff_info.get("is_fakeout_risk", False),
+            "pinbar_type": pinbar_info.get("sweep_type", "none"),
+            "pinbar_is_sweep": pinbar_info.get("is_sweep", False),
+            "pinbar_wick_ratio": pinbar_info.get("wick_ratio", 0.0),
+            "cvd_divergence": cvd_div.get("divergence_type", "neutral"),
+            "cvd_correlation": cvd_div.get("correlation", 0.0),
+            "oi_regime": oi_reg.get("regime", "neutral"),
+            "oi_regime_desc": oi_reg.get("regime_desc", "中性平衡"),
+            "funding_zscore": funding_z.get("zscore", 0.0),
+            "funding_crowding": funding_z.get("crowding_status", "normal"),
         }
 
     def update_candle(self, bar: Bar) -> None:
@@ -310,10 +388,18 @@ class SymbolState:
                     
                     # Also persist to Columnar Store
                     try:
-                        latest_oi = self.latest_oi.open_interest if self.latest_oi else 0.0
-                        latest_funding = self.latest_funding.funding_rate if self.latest_funding else 0.0
-                        cvd_val = self.get_cvd("1h")
-                        imbalance_val = self.book_imbalance(10)
+                        latest_oi_rows = self.recent_oi(1)
+                        latest_oi = latest_oi_rows[-1].open_interest if latest_oi_rows else 0.0
+                        latest_funding_rows = self.recent_funding(1)
+                        latest_funding = latest_funding_rows[-1].rate if latest_funding_rows else 0.0
+                        cvd_val = self.cvd_window(60) or 0.0
+                        imbalance_val = 0.0
+                        if self.latest_book and (self.latest_book.bids or self.latest_book.asks):
+                            b_sz = sum(lvl.size for lvl in self.latest_book.bids[:10])
+                            a_sz = sum(lvl.size for lvl in self.latest_book.asks[:10])
+                            tot = b_sz + a_sz
+                            if tot > 0:
+                                imbalance_val = (b_sz - a_sz) / tot
                         ColumnarMarketStore.get_instance().append_bar(
                             symbol=self.symbol,
                             timeframe=tf,

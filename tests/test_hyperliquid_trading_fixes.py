@@ -130,3 +130,52 @@ def test_trading_tool_reduce_only_passthrough():
             reduce_only=True,
         )
         assert "已提交" in res or "状态" in res
+
+
+# ─── 5. State Machine Immediate Fill Tests ────────────────────────────────────
+
+def test_order_state_transitions_submitted_to_filled():
+    from xmlx_vlm.ai_trader.oms.constants import OrderState
+    order = Order(symbol="kSHIB/USDC", side=OrderSide.SELL, qty=Decimal("1000"))
+    assert order.state == OrderState.DRAFT
+    order.transition_to(OrderState.PRE_TRADE_OK)
+    order.transition_to(OrderState.SUBMITTED)
+    assert order.state == OrderState.SUBMITTED
+
+    # Direct transition to FILLED on instant fill
+    order.transition_to(OrderState.FILLED)
+    assert order.state == OrderState.FILLED
+
+
+def test_hl_response_to_order_immediate_fill():
+    from xmlx_vlm.ai_trader.oms.constants import OrderState
+    from xmlx_vlm.ai_trader.oms.execution.hyperliquid.mapper import hl_response_to_order
+    order = Order(symbol="kSHIB/USDC", side=OrderSide.SELL, qty=Decimal("1000000"))
+    order.transition_to(OrderState.PRE_TRADE_OK)
+    order.transition_to(OrderState.SUBMITTED)
+
+    hl_resp = {
+        "status": "ok",
+        "response": {
+            "type": "order",
+            "data": {
+                "statuses": [
+                    {
+                        "filled": {
+                            "oid": 987654321,
+                            "totalSz": "1000000.0",
+                            "avgPx": "0.0215",
+                        }
+                    }
+                ]
+            },
+        },
+    }
+
+    res_order = hl_response_to_order(hl_resp, order)
+    assert res_order.state == OrderState.FILLED
+    assert res_order.order_id == "987654321"
+    assert res_order.filled_qty == Decimal("1000000.0")
+    assert res_order.avg_fill_price == Decimal("0.0215")
+    assert res_order.remaining_qty == Decimal("0")
+

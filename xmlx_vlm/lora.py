@@ -5,6 +5,7 @@ import logging
 import mlx.optimizers as optim
 from datasets import load_dataset
 
+from .config import DEFAULT_MODEL
 from .trainer.datasets import PreferenceVisionDataset, VisionDataset
 from .trainer.orpo_trainer import ORPOTrainingArgs, train_orpo
 from .trainer.sft_trainer import TrainingArgs, train
@@ -262,7 +263,7 @@ if __name__ == "__main__":
 
     # Model arguments
     parser.add_argument(
-        "--model-path", type=str, default="mlx-community/diffusiongemma-26B-A4B-it-4bit"
+        "--model-path", type=str, default=DEFAULT_MODEL
     )
     parser.add_argument("--full-finetune", action="store_true")
     parser.add_argument("--train-vision", action="store_true")

@@ -178,7 +178,7 @@ class OMSEngine:
             import uuid
             client_order_id = uuid.uuid4().hex
         return Order(
-            symbol=symbol.upper(),
+            symbol=symbol,
             side=OrderSide(side.lower()),
             order_type=order_type,
             qty=to_decimal(qty),
@@ -453,7 +453,11 @@ class OMSEngine:
                 )
                 try:
                     result = await self.submit_order(order, mark_price=mark_price)
-                    results.append(result)
+                    if result.get("status") == "rejected" or result.get("order", {}).get("state") == "rejected":
+                        err_msg = result.get("error") or result.get("order", {}).get("reject_reason") or "Order rejected by exchange"
+                        results.append({"symbol": pos.symbol, "error": err_msg, "order": result.get("order")})
+                    else:
+                        results.append(result)
                 except Exception as exc:
                     logger.error("flatten failed for %s: %s", pos.symbol, exc)
                     results.append({"symbol": pos.symbol, "error": str(exc)})
@@ -475,12 +479,7 @@ class OMSEngine:
         """Close an active position for the given symbol, offsetting long/short directions with reduce_only=True."""
         await self.sync()
         
-        target = symbol.upper()
-        pos = None
-        for p in self.portfolio.list_positions():
-            if p.symbol.upper() == target or p.symbol.split('/')[0].upper() == target:
-                pos = p
-                break
+        pos = self.portfolio.get_position(symbol)
                 
         if pos is None or pos.is_flat():
             logger.info("No active position to close for symbol: %s", symbol)

@@ -20,6 +20,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import mlx.core as mx
 from tabulate import tabulate
 
+from .config import DEFAULT_MODEL
 from .utils import load
 from .generate import generate
 from .optimizations import detect_hardware
@@ -164,7 +165,7 @@ def run(model_name: str, num_prompts: int = 5, max_tokens: int = 256, temperatur
 
 def main():
     parser = argparse.ArgumentParser(description="MLX-VLM benchmark")
-    parser.add_argument("--model", required=True, help="Model name or path")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model name or path (default: {DEFAULT_MODEL})")
     parser.add_argument("--prompts", type=int, default=5, help="Number of prompts")
     parser.add_argument("--max-tokens", type=int, default=256, help="Max tokens per prompt")
     parser.add_argument("--temperature", type=float, default=0.7)

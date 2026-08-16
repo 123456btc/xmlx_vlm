@@ -178,20 +178,25 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
         limit_px = float(order.price) if order.price else 0.0
         if is_market:
             tif = "Ioc"
-            if limit_px <= 0.0:
-                # 尝试从 allMids 获取当前标记价
-                try:
-                    all_mids = self._client.info({"type": "allMids"})
-                    if isinstance(all_mids, dict) and coin in all_mids:
-                        limit_px = float(all_mids[coin])
-                except Exception:
-                    pass
-            # 施加 1% 滑点保护
+            # 优先从 allMids 获取当前最新市价
+            fresh_px = 0.0
+            try:
+                all_mids = self._client.info({"type": "allMids"})
+                if isinstance(all_mids, dict) and coin in all_mids:
+                    fresh_px = float(all_mids[coin])
+            except Exception:
+                pass
+            if fresh_px > 0.0:
+                limit_px = fresh_px
+            elif limit_px <= 0.0:
+                limit_px = float(order.price) if order.price else 0.0
+
+            # 施加 5% 滑点保护 (Hyperliquid 官方市价单标准滑点)
             if limit_px > 0.0:
-                limit_px = limit_px * 1.01 if is_buy else limit_px * 0.99
+                limit_px = limit_px * 1.05 if is_buy else limit_px * 0.95
             else:
                 # 若无法获取且为 0，防止报错设为安全极值
-                limit_px = 1000000.0 if is_buy else 0.0001
+                limit_px = 1000000.0 if is_buy else 0.000001
         else:
             tif = "Gtc"
 
@@ -523,7 +528,7 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
             bid = to_decimal(impact[0]) if impact else None
             ask = to_decimal(impact[1]) if len(impact) > 1 else None
             return Quote(
-                symbol=symbol.upper(),
+                symbol=symbol,
                 bid=bid,
                 ask=ask,
                 mark=to_decimal(ctx.get("markPx", "0")) or None,
@@ -552,7 +557,7 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
         except Exception:
             depth_qty = Decimal("1")
         return OrderBook(
-            symbol=symbol.upper(),
+            symbol=symbol,
             bids=[OrderBookLevel(price=quote.bid, qty=depth_qty)],
             asks=[OrderBookLevel(price=quote.ask, qty=depth_qty)],
             timestamp_ms=quote.timestamp_ms,
@@ -621,7 +626,7 @@ class HyperliquidExecutionAdapter(ExecutionAdapter):
             while len(bucket_volumes) < buckets:
                 bucket_volumes.append(ZERO)
             return VolumeProfile(
-                symbol=symbol.upper(),
+                symbol=symbol,
                 total_volume=total_volume,
                 buckets=bucket_volumes[:buckets],
                 bucket_labels=[f"bucket_{i}" for i in range(len(bucket_volumes[:buckets]))],

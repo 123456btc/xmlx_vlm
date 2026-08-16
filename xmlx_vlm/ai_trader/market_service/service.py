@@ -519,11 +519,14 @@ class MarketDataService:
 
     # ── 对外同步查询接口 ──
     def get_quote(self, symbol: str) -> Optional[Quote]:
-        return self.state.get(symbol).get_quote()
+        from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+        coin = extract_base_coin(symbol)
+        return self.state.get(coin).get_quote()
 
     def get_summary(self, symbol: str, light: bool = False) -> Optional[MarketSummary]:
         """基于内存状态构造综合市场摘要."""
-        coin = symbol.upper().replace("/USDC", "").replace("/USD", "")
+        from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+        coin = extract_base_coin(symbol)
         if not light:
             self.subscribe(coin)
         state = self.state.get(coin)
@@ -592,6 +595,14 @@ class MarketDataService:
                 cvd_15m=None,
                 cvd_1h=None,
                 cvd_4h=None,
+                bb_bandwidth=None,
+                squeeze_score=None,
+                is_squeezed=False,
+                candle_efficiency=None,
+                pinbar_type="none",
+                cvd_divergence="neutral",
+                oi_regime="neutral",
+                funding_zscore=None,
             )
 
         ohlcv_1h = state.get_ohlcv("1h", limit=100)
@@ -687,11 +698,20 @@ class MarketDataService:
             cvd_15m=state.cvd_window(15),
             cvd_1h=state.cvd_window(60),
             cvd_4h=state.cvd_window(4 * 60),
+            bb_bandwidth=ind_1h.get("bb_bandwidth"),
+            squeeze_score=ind_1h.get("squeeze_score"),
+            is_squeezed=ind_1h.get("is_squeezed", False),
+            candle_efficiency=ind_1h.get("candle_efficiency"),
+            pinbar_type=ind_1h.get("pinbar_type", "none"),
+            cvd_divergence=ind_1h.get("cvd_divergence", "neutral"),
+            oi_regime=ind_1h.get("oi_regime", "neutral"),
+            funding_zscore=ind_1h.get("funding_zscore"),
         )
 
     def get_multi_timeframe_summary(self, symbol: str) -> Dict[str, object]:
         """返回 5m/15m/1h 三周期摘要."""
-        coin = symbol.upper().replace("/USDC", "").replace("/USD", "")
+        from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+        coin = extract_base_coin(symbol)
         self.subscribe(coin)
         state = self.state.get(coin)
         result: Dict[str, object] = {}
@@ -720,7 +740,8 @@ class MarketDataService:
         Query columnar market series with Point-in-Time (`as_of_ms`) isolation.
         """
         from .columnar_store import ColumnarMarketStore
-        coin = symbol.upper().replace("/USDC", "").replace("/USD", "")
+        from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+        coin = extract_base_coin(symbol)
         return ColumnarMarketStore.get_instance().query_columnar(
             symbol=coin,
             timeframe=timeframe,
@@ -735,7 +756,8 @@ class MarketDataService:
         Retrieve historical point-in-time state snapshot without lookahead bias.
         """
         from .columnar_store import ColumnarMarketStore
-        coin = symbol.upper().replace("/USDC", "").replace("/USD", "")
+        from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+        coin = extract_base_coin(symbol)
         return ColumnarMarketStore.get_instance().get_snapshot_as_of(coin, as_of_ms=as_of_ms)
 
     def get_connection_state(self) -> str:

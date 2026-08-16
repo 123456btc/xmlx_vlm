@@ -28,7 +28,11 @@
                     <span class="status-label">Model:</span>
                     <span id="header-model-name" class="status-val font-mono">Loading...</span>
                 </div>
-                <span id="header-trading-mode" style="display: none;"></span>
+                <div class="status-divider"></div>
+                <div class="status-item">
+                    <span class="status-label">Account:</span>
+                    <span id="header-trading-mode" class="mode-badge live font-mono">LIVE</span>
+                </div>
                 <div class="status-divider"></div>
                 <div class="status-item">
                     <span class="status-label">API Server:</span>
@@ -418,10 +422,8 @@
                             <div class="sidebar-search-bar">
                                 <label for="strategy-id-select" class="sidebar-label">Strategy ID:</label>
                                 <select id="strategy-id-select" class="form-control font-mono">
-                                    <option value="trend_follow_btc">trend_follow_btc (BTC/USDC)</option>
-                                    <option value="trend_follow_eth">trend_follow_eth (ETH/USDC)</option>
-                                    <option value="trend_follow_sol">trend_follow_sol (SOL/USDC)</option>
-                                    <option value="trend_follow_doge">trend_follow_doge (DOGE/USDC)</option>
+                                    <option value="trend_follow_all_hyperliquid">🟢 [实盘 Live] trend_follow_all_hyperliquid</option>
+                                    <option value="trend_follow_all_paper">🟡 [模拟 Paper] trend_follow_all_paper</option>
                                 </select>
                             </div>
                             <div id="strategy-decisions-list" class="strategy-decisions-list scrollable">
@@ -446,6 +448,14 @@
                             <div id="audit-replay-content" class="audit-replay-content" style="display: none;">
                                 <!-- Replay Header Info Bar -->
                                 <div class="audit-replay-header">
+                                    <div class="meta-item">
+                                        <span class="meta-label">Mode:</span>
+                                        <span id="audit-mode-badge" class="mode-badge live">LIVE 实盘</span>
+                                    </div>
+                                    <div class="meta-item">
+                                        <span class="meta-label">Strategy:</span>
+                                        <span id="audit-strategy-name" class="meta-val font-mono">-</span>
+                                    </div>
                                     <div class="meta-item">
                                         <span class="meta-label">Cycle:</span>
                                         <span id="audit-cycle" class="meta-val font-mono">-</span>
@@ -507,26 +517,43 @@
                 <div class="right-panel-section portfolio-section">
                     <div class="panel-header section-header">
                         <h2><i class="fa-solid fa-wallet"></i> OMS Account</h2>
+                        <span id="portfolio-mode-badge" class="mode-badge live">LIVE 实盘</span>
                     </div>
+
+                    <!-- Account Network & Wallet Address metadata bar -->
+                    <div class="account-meta-bar">
+                        <span class="account-network-tag" id="portfolio-network-tag"><i class="fa-solid fa-shield-halved"></i> Hyperliquid Mainnet</span>
+                        <div class="account-address-box" id="portfolio-wallet-box" title="点击复制完整钱包地址">
+                            <i class="fa-regular fa-copy"></i>
+                            <span id="portfolio-wallet-addr" class="font-mono">--</span>
+                        </div>
+                    </div>
+
                     <div class="account-summary-card">
-                        <div class="summary-item">
-                            <span class="summary-label">Available Margin</span>
-                            <span id="portfolio-balance" class="summary-val font-mono">$0.00</span>
+                        <div class="summary-top-row">
+                            <div class="summary-item">
+                                <span class="summary-label">Total Equity (总权益)</span>
+                                <span id="portfolio-equity" class="summary-val font-mono">$0.00</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">Available Margin (可用)</span>
+                                <span id="portfolio-balance" class="summary-val font-mono">$0.00</span>
+                            </div>
                         </div>
                         <div class="summary-grid">
                             <div class="summary-item">
-                                <span class="summary-label">Unrealized PnL</span>
+                                <span class="summary-label">Unrealized PnL (未结盈亏)</span>
                                 <span id="portfolio-unrealized" class="summary-val font-mono neutral">$0.00</span>
                             </div>
                             <div class="summary-item">
-                                <span class="summary-label">Margin Usage</span>
+                                <span class="summary-label">Margin Usage (占用率)</span>
                                 <span id="portfolio-margin-util" class="summary-val font-mono">0%</span>
                             </div>
                         </div>
                     </div>
                     
                     <div class="positions-header">
-                        <h3>Open Positions</h3>
+                        <h3>Open Positions (实时持仓)</h3>
                     </div>
                     <div id="positions-list" class="positions-list scrollable">
                         <div class="no-positions">No open positions</div>
@@ -551,6 +578,12 @@
         <div id="lightbox-caption"></div>
     </div>
 
-    <script type="module" src="/static/app.js?v=1.0.0"></script>
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Quant Modal Backdrop -->
+    <div id="quant-modal-container" class="quant-modal-backdrop"></div>
+
+    <script type="module" src="/static/app.js?v=2.0.2"></script>
 </body>
 </html>

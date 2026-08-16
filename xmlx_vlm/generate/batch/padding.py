@@ -109,23 +109,26 @@ def _merge_prefill_prompt_kwargs(
     lengths = [len(ids) for ids in input_ids]
     max_length = max(lengths)
 
-    row_embeds: List[mx.array] = []
-    embed_dtype = None
-    embed_dim = None
-    for kw, length in zip(prompt_kwargs_list, lengths):
-        if not kw or kw.get("inputs_embeds") is None:
-            raise ValueError("inputs_embeds is required")
-        embeds = kw["inputs_embeds"]  # [1, length, D]
-        embed_dtype = embeds.dtype
-        embed_dim = embeds.shape[-1]
-        if length < max_length:
-            pad = mx.zeros(
-                (embeds.shape[0], max_length - length, embed_dim),
-                dtype=embed_dtype,
-            )
-            embeds = mx.concatenate([pad, embeds], axis=1)
-        row_embeds.append(embeds)
-    inputs_embeds = mx.concatenate(row_embeds, axis=0)
+    has_any_embeds = any(kw and kw.get("inputs_embeds") is not None for kw in prompt_kwargs_list)
+    inputs_embeds = None
+    if has_any_embeds:
+        row_embeds: List[mx.array] = []
+        embed_dtype = None
+        embed_dim = None
+        for kw, length in zip(prompt_kwargs_list, lengths):
+            if not kw or kw.get("inputs_embeds") is None:
+                raise ValueError("inputs_embeds is required when mixing embedded prompts")
+            embeds = kw["inputs_embeds"]  # [1, length, D]
+            embed_dtype = embeds.dtype
+            embed_dim = embeds.shape[-1]
+            if length < max_length:
+                pad = mx.zeros(
+                    (embeds.shape[0], max_length - length, embed_dim),
+                    dtype=embed_dtype,
+                )
+                embeds = mx.concatenate([pad, embeds], axis=1)
+            row_embeds.append(embeds)
+        inputs_embeds = mx.concatenate(row_embeds, axis=0)
 
     merged_kwargs: dict = {}
     per_row_keys: dict = {}

@@ -28,6 +28,9 @@ class Position:
     updated_at_ms: int = field(default_factory=utc_now_ms)
 
     def __post_init__(self):
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
+        if self.symbol:
+            self.symbol = normalize_symbol(self.symbol)
         self.qty = to_decimal(self.qty)
         self.avg_entry_price = to_decimal(self.avg_entry_price)
         self.realized_pnl = to_decimal(self.realized_pnl)

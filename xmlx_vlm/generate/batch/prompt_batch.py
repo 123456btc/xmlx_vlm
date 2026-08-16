@@ -171,11 +171,12 @@ class PromptProcessingBatch:
 
     def needs_processing(self):
         """True if prompt needs chunked processing before generate()."""
-        if self._inputs_embeds is None or self.prefill_step_size is None:
+        seq_len = self._inputs_embeds.shape[1] if self._inputs_embeds is not None else self._input_ids.shape[1]
+        if self.prefill_step_size is None:
             return self._next_apc_checkpoint_column() is not None
         if self._next_apc_checkpoint_column() is not None:
             return True
-        return self._inputs_embeds.shape[1] > self.prefill_step_size
+        return seq_len > self.prefill_step_size
 
     def _apc_checkpoint_column_for_meta(
         self, batch_idx: int, meta: dict
@@ -269,25 +270,27 @@ class PromptProcessingBatch:
         if not self.needs_processing():
             return 0
 
-        step = self.prefill_step_size or self._inputs_embeds.shape[1]
-        n = min(step, self._inputs_embeds.shape[1] - 1)
+        seq_len = self._inputs_embeds.shape[1] if self._inputs_embeds is not None else self._input_ids.shape[1]
+        step = self.prefill_step_size or seq_len
+        n = min(step, seq_len - 1)
         checkpoint_col = self._next_apc_checkpoint_column()
         if checkpoint_col is not None:
             n = min(n, checkpoint_col - self._processed_prompt_columns)
         if n <= 0:
             return 0
         prompt_kwargs = self._prompt_kwargs_for_step(n)
+        model_kwargs = {"cache": self.prompt_cache, "n_to_process": n, **prompt_kwargs}
+        if self._inputs_embeds is not None:
+            model_kwargs["inputs_embeds"] = self._inputs_embeds[:, :n]
         self.model(
             self._input_ids[:, :n],
-            cache=self.prompt_cache,
-            inputs_embeds=self._inputs_embeds[:, :n],
-            n_to_process=n,
-            **prompt_kwargs,
+            **model_kwargs,
         )
         mx.eval([c.state for c in self.prompt_cache])
         self._processed_prompt_columns += n
         self._store_apc_exact_checkpoints()
-        self._inputs_embeds = self._inputs_embeds[:, n:]
+        if self._inputs_embeds is not None:
+            self._inputs_embeds = self._inputs_embeds[:, n:]
         self._input_ids = self._input_ids[:, n:]
         for k in self._prompt_length_aware_keys:
             self._prompt_kwargs[k] = self._prompt_kwargs[k][:, n:, ...]
@@ -298,11 +301,12 @@ class PromptProcessingBatch:
         self, sampler, stop_criteria, compute_logprobs=True, top_logprobs_k=0
     ) -> GenerationBatch:
         """Process final tokens and transition to GenerationBatch."""
+        model_kwargs = {"cache": self.prompt_cache, **self._prompt_kwargs}
+        if self._inputs_embeds is not None:
+            model_kwargs["inputs_embeds"] = self._inputs_embeds
         output = self.model(
             self._input_ids,
-            cache=self.prompt_cache,
-            inputs_embeds=self._inputs_embeds,
-            **self._prompt_kwargs,
+            **model_kwargs,
         )
         logits = output.logits if hasattr(output, "logits") else output
         if self._right_pad_per_row is not None and any(self._right_pad_per_row):

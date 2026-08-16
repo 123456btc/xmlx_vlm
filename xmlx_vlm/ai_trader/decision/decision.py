@@ -32,8 +32,10 @@ class Decision:
     reasoning: str = ""
 
     def __post_init__(self):
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
         self.action = self.action.lower().strip()
-        self.symbol = self.symbol.upper().strip()
+        if self.symbol:
+            self.symbol = normalize_symbol(self.symbol)
         if self.position_size_usd is not None:
             self.position_size_usd = to_decimal(self.position_size_usd)
         if self.price is not None:

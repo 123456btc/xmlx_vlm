@@ -9,10 +9,11 @@ from xmlx_vlm.ai_trader.oms.utils.decimal import to_decimal, ZERO
 
 
 def validate_symbol(symbol: Any) -> str:
-    """校验并标准化交易对格式."""
-    if not isinstance(symbol, str) or not symbol.strip():
+    """校验并标准化交易对格式为 Canonical BASE/QUOTE."""
+    from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
+    if not symbol or not str(symbol).strip():
         raise ValueError("symbol must be a non-empty string")
-    return symbol.strip().upper()
+    return normalize_symbol(symbol)
 
 
 def validate_positive(value: Any, name: str = "value") -> Decimal:

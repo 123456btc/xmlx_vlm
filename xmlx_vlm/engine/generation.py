@@ -540,66 +540,67 @@ class ResponseGenerator:
                         batch_gen = None
                         continue
                     rqueue, raw_inputs, prompt_tokens, args, images = item
-                    if batch_gen is None:
-                        num_l = (
-                            len(self.model.language_model.layers)
-                            if hasattr(self.model.language_model, "layers")
-                            else (len(self.model.layers) if hasattr(self.model, "layers") else 1)
-                        )
-                        kv_bits_layer = get_kv_bits_per_layer(num_l, self.kv_bits)
-                        batch_gen = BatchGenerator(
-                            self.model.language_model,
-                            self.processor,
-                            stop_tokens=self.stop_tokens,
-                            sampler=self._make_sampler(args),
-                            completion_batch_size=self.max_num_seqs,
-                            kv_bits=self.kv_bits,
-                            kv_bits_per_layer=kv_bits_layer,
-                            kv_group_size=self.kv_group_size,
-                            kv_quant_scheme=self.kv_quant_scheme,
-                            quantized_kv_start=self.quantized_kv_start,
-                            top_logprobs_k=self.top_logprobs_k,
-                            stream=generation_stream,
-                            apc_manager=self.apc_manager,
-                        )
-
-                    # Vision encoder runs on the GPU thread; text tokenization
-                    # already happened on the caller thread.
-                    input_ids, gen_kwargs = self._gpu_embed(raw_inputs, images)
-                    has_embeds = bool(gen_kwargs.get("inputs_embeds") is not None)
-                    # Per-tenant APC salt: keep this out of the model forward
-                    # by namespacing under "_apc_tenant"; BatchGenerator strips
-                    # it before merging kwargs for the language model.
-                    if getattr(args, "tenant_id", None):
-                        gen_kwargs["_apc_tenant"] = args.tenant_id
-
-                    # Drain pending text-only prompts before inserting an
-                    # embed-bearing request — multi-row PromptProcessingBatch
-                    # admission expects all rows to carry inputs_embeds (the
-                    # mixed APC path concatenates them per-row).
-                    if has_embeds and any(
-                        not (s[3] and s[3].get("inputs_embeds") is not None)
-                        for s in batch_gen.unprocessed_prompts
-                    ):
-                        self._flush(batch_gen, active)
-
                     try:
+                        if batch_gen is None:
+                            num_l = (
+                                len(self.model.language_model.layers)
+                                if hasattr(self.model.language_model, "layers")
+                                else (len(self.model.layers) if hasattr(self.model, "layers") else 1)
+                            )
+                            kv_bits_layer = get_kv_bits_per_layer(num_l, self.kv_bits)
+                            batch_gen = BatchGenerator(
+                                self.model.language_model,
+                                self.processor,
+                                stop_tokens=self.stop_tokens,
+                                sampler=self._make_sampler(args),
+                                completion_batch_size=self.max_num_seqs,
+                                kv_bits=self.kv_bits,
+                                kv_bits_per_layer=kv_bits_layer,
+                                kv_group_size=self.kv_group_size,
+                                kv_quant_scheme=self.kv_quant_scheme,
+                                quantized_kv_start=self.quantized_kv_start,
+                                top_logprobs_k=self.top_logprobs_k,
+                                stream=generation_stream,
+                                apc_manager=self.apc_manager,
+                            )
+
+                        # Vision encoder runs on the GPU thread; text tokenization
+                        # already happened on the caller thread.
+                        input_ids, gen_kwargs = self._gpu_embed(raw_inputs, images)
+                        has_embeds = bool(gen_kwargs.get("inputs_embeds") is not None)
+                        # Per-tenant APC salt: keep this out of the model forward
+                        # by namespacing under "_apc_tenant"; BatchGenerator strips
+                        # it before merging kwargs for the language model.
+                        if getattr(args, "tenant_id", None):
+                            gen_kwargs["_apc_tenant"] = args.tenant_id
+
+                        # Drain pending text-only prompts before inserting an
+                        # embed-bearing request — multi-row PromptProcessingBatch
+                        # admission expects all rows to carry inputs_embeds (the
+                        # mixed APC path concatenates them per-row).
+                        if has_embeds and any(
+                            not (s[3] and s[3].get("inputs_embeds") is not None)
+                            for s in batch_gen.unprocessed_prompts
+                        ):
+                            self._flush(batch_gen, active)
+
                         (uid,) = batch_gen.insert(
                             [input_ids.squeeze(0).tolist()],
                             max_tokens=args.max_tokens,
                             prompt_kwargs=[gen_kwargs],
                             logits_processors=[args.logits_processors],
                         )
+
+                        rqueue.put(GenerationContext(uid=uid, prompt_tokens=prompt_tokens))
+                        active[uid] = {
+                            "rqueue": rqueue,
+                            "detokenizer": make_streaming_detokenizer(self.processor),
+                            "gen_kwargs": gen_kwargs if has_embeds else None,
+                        }
                     except Exception as e:
+                        logger.exception("Error preparing request for generation")
                         rqueue.put(e)
                         continue
-
-                    rqueue.put(GenerationContext(uid=uid, prompt_tokens=prompt_tokens))
-                    active[uid] = {
-                        "rqueue": rqueue,
-                        "detokenizer": make_streaming_detokenizer(self.processor),
-                        "gen_kwargs": gen_kwargs if has_embeds else None,
-                    }
 
                 if not active or batch_gen is None:
                     continue

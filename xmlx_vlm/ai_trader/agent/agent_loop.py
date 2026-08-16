@@ -11,14 +11,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, AsyncGenerator
 from enum import Enum
 
-import requests
 import httpx
-from rich import print as rprint
+import requests
+try:
+    from rich import print as rprint
+except ImportError:
+    rprint = print
 
-from xmlx_vlm import load
-from xmlx_vlm.generate import stream_generate
-from xmlx_vlm.prompt_utils import apply_chat_template
-from xmlx_vlm.vision_cache import VisionFeatureCache
+try:
+    from xmlx_vlm.utils import load
+    from xmlx_vlm.generate import stream_generate
+    from xmlx_vlm.prompt_utils import apply_chat_template
+    from xmlx_vlm.vision_cache import VisionFeatureCache
+except ImportError:
+    load = None
+    stream_generate = None
+    apply_chat_template = None
+    VisionFeatureCache = None
 
 from xmlx_vlm.agent_core import (
     ContextCompressor,
@@ -90,8 +99,7 @@ class AITraderAgent:
         self.use_server = False
         self.server_model: Optional[str] = None
         self.model = None
-        self.processor = None
-        self.vision_cache = VisionFeatureCache()
+        self.vision_cache = VisionFeatureCache() if VisionFeatureCache is not None else None
         self.prompt_cache_state = None
         
         # Enterprise Guardrails & Context Compressor

@@ -279,6 +279,79 @@ class OMSSDK:
         }
 
 
+class ResearchSDK:
+    """自进化 Alpha 因子挖掘与投研 In-Memory SDK 接口."""
+
+    def __init__(self, research_tool: Optional[Any] = None):
+        if research_tool is None:
+            from xmlx_vlm.ai_trader.tools.research import FactorMiningTool
+            self._tool = FactorMiningTool()
+        else:
+            self._tool = research_tool
+
+    def evolve_alpha_factors(
+        self,
+        symbol: str = "BTC/USDT",
+        timeframe: str = "1h",
+        generations: int = 3,
+        population_size: int = 30,
+        target_mechanism: str = "composite",
+    ) -> Dict[str, Any]:
+        """运行自进化因子挖掘流水线，返回发现的最优因子报告与参数."""
+        raw_res = self._tool.execute(
+            action="evolve_factors",
+            symbol=symbol,
+            timeframe=timeframe,
+            generations=generations,
+            population_size=population_size,
+            target_mechanism=target_mechanism,
+        )
+        return {
+            "status": "success",
+            "report_markdown": raw_res,
+            "top_factors": self.get_top_alpha_factors(top_n=5),
+        }
+
+    def get_memory_summary(self) -> Dict[str, Any]:
+        """获取当前自进化经验记忆库（Success / Failure 模式库）概览."""
+        raw = self._tool.execute(action="get_memory_summary")
+        import json
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {"raw": raw}
+
+    def get_top_alpha_factors(self, top_n: int = 5) -> List[Dict[str, Any]]:
+        """获取记忆库中历史综合表现最优的 Alpha 因子列表."""
+        raw = self._tool.execute(action="get_top_factors", top_n=top_n)
+        import json
+        try:
+            return json.loads(raw)
+        except Exception:
+            return []
+
+    def diagnose_factor(
+        self,
+        formula: str,
+        rank_ic: float = 0.03,
+        ir: float = 0.20,
+        t_stat: float = 1.8,
+    ) -> Dict[str, Any]:
+        """对候选因子进行 Co-STEER 归因诊断并返回优化后的公式."""
+        raw = self._tool.execute(
+            action="diagnose_factor",
+            formula=formula,
+            rank_ic=rank_ic,
+            ir=ir,
+            t_stat=t_stat,
+        )
+        import json
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {"raw": raw}
+
+
 class TraderSDK:
     """AI Trader 聚合 In-Memory SDK 入口."""
 
@@ -287,9 +360,11 @@ class TraderSDK:
         market_tool: Optional[MarketDataTool] = None,
         trading_tool: Optional[TradingTool] = None,
         oms: Optional[OMSEngine] = None,
+        research_tool: Optional[Any] = None,
     ):
         self.market = MarketSDK(market_tool=market_tool)
         self.oms = OMSSDK(trading_tool=trading_tool, oms=oms)
+        self.research = ResearchSDK(research_tool=research_tool)
 
     def scan_and_rank(self, metric: str = "rsi", reverse: bool = False, top_k: int = 5) -> List[Dict[str, Any]]:
         """快速排序辅助方法."""

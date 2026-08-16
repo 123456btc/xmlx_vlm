@@ -68,7 +68,7 @@ def test_decision_engine_parses_with_think_scrubber():
     decisions = engine._parse_decisions(raw_llm_response)
     assert len(decisions) == 1
     d = decisions[0]
-    assert d.symbol == "BTC"
+    assert d.symbol == "BTC/USDC"
     assert d.action == "open_long"
     assert d.side == "buy"
     assert d.position_size_usd == Decimal("500.0")

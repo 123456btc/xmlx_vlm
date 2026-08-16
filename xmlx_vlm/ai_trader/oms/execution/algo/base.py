@@ -34,7 +34,7 @@ class ParentOrder:
     reject_reason: Optional[str] = None
 
     def __post_init__(self):
-        self.symbol = self.symbol.upper()
+        self.symbol = self.symbol.strip()
         self.total_qty = abs(to_decimal(self.total_qty))
         self.remaining_qty = self.total_qty - self.filled_qty
         if self.remaining_qty < ZERO:

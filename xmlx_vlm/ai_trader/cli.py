@@ -1,6 +1,6 @@
 """AI Trader CLI —— 聊天即交易.
 
-默认连接 service.sh 启动的本地服务 (http://localhost:8080)，
+默认连接 service.sh 启动的本地服务 (http://localhost:5118)，
 复用其加载的模型与工具调用能力。也支持 --local 本地加载模型.
 
 用法:
@@ -8,7 +8,7 @@
     xmlx_vlm.ai-trader
 
     # 本地加载模型
-    xmlx_vlm.ai-trader --local --model mlx-community/Qwen2.5-VL-7B-Instruct-4bit
+    xmlx_vlm.ai-trader --local --model mlx-community/Qwen3.8-27B-4bit
 
     # 非交互模式执行一句指令
     xmlx_vlm.ai-trader --prompt "BTC 现在多少钱？"
@@ -27,21 +27,46 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from rich import print as rprint
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.prompt import Prompt
+
+try:
+    from rich import print as rprint
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+except ImportError:
+    rprint = print
+    class Console:
+        def print(self, *args, **kwargs):
+            print(*args)
+        def rule(self, *args, **kwargs):
+            pass
+    class Markdown:
+        def __init__(self, text):
+            self.text = text
+    class Panel:
+        def __init__(self, renderable, **kwargs):
+            self.renderable = renderable
+    class Prompt:
+        @staticmethod
+        def ask(prompt, **kwargs):
+            return input(prompt)
 
 # 确保项目根目录在路径中
 _project_root = Path(__file__).resolve().parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from xmlx_vlm import load
-from xmlx_vlm.generate import stream_generate
-from xmlx_vlm.prompt_utils import apply_chat_template
-from xmlx_vlm.vision_cache import VisionFeatureCache
+try:
+    from xmlx_vlm.utils import load
+    from xmlx_vlm.generate import stream_generate
+    from xmlx_vlm.prompt_utils import apply_chat_template
+    from xmlx_vlm.vision_cache import VisionFeatureCache
+except ImportError:
+    load = None
+    stream_generate = None
+    apply_chat_template = None
+    VisionFeatureCache = None
 
 import asyncio
 from xmlx_vlm.ai_trader.config import DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_SERVER_URL
@@ -212,16 +237,16 @@ def encode_image_to_base64(image_path: str) -> str:
 class AITraderChat:
     def __init__(
         self,
-        server_url: str = "http://localhost:8080",
+        server_url: Optional[str] = None,
         api_key: Optional[str] = None,
         model_path: Optional[str] = None,
         local_only: bool = False,
         temperature: float = 0.3,
         max_tokens: int = 2048,
     ):
-        self.server_url = server_url.rstrip("/")
-        self.api_key = api_key or os.getenv("XMLX_VLM_API_KEY") or "x123456"
-        self.model_path = model_path or "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
+        self.server_url = (server_url or DEFAULT_SERVER_URL).rstrip("/")
+        self.api_key = api_key or os.getenv("XMLX_VLM_API_KEY") or DEFAULT_API_KEY
+        self.model_path = model_path or os.getenv("XMLX_VLM_MODEL") or DEFAULT_MODEL
         self.local_only = local_only
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -231,29 +256,42 @@ class AITraderChat:
         self.server_model: Optional[str] = None
         self.model = None
         self.processor = None
-        self.vision_cache = VisionFeatureCache()
+        self.vision_cache = VisionFeatureCache() if VisionFeatureCache is not None else None
         self.prompt_cache_state = None
         self.current_image_path: Optional[str] = None
 
     def _probe_server(self) -> bool:
-        try:
-            headers = {}
-            if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
-            resp = requests.get(
-                f"{self.server_url}/health", headers=headers, timeout=5
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                loaded = data.get("loaded_model")
-                if loaded:
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        # 尝试候选地址（兼顾 macOS 下 localhost 与 127.0.0.1 的 IPv4/IPv6 路由差异）
+        candidate_urls = [self.server_url]
+        if "localhost" in self.server_url:
+            candidate_urls.append(self.server_url.replace("localhost", "127.0.0.1"))
+        elif "127.0.0.1" in self.server_url:
+            candidate_urls.append(self.server_url.replace("127.0.0.1", "localhost"))
+
+        for url in candidate_urls:
+            try:
+                resp = requests.get(
+                    f"{url}/health",
+                    headers=headers,
+                    timeout=5,
+                    proxies={"http": None, "https": None},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    loaded = data.get("loaded_model") or data.get("model") or self.model_path
+                    self.server_url = url
                     self.server_model = loaded
                     rprint(
-                        f"[bold green]已连接到本地服务:[/bold green] {self.server_url} (model: {loaded})"
+                        f"[bold green]已连接到常驻推理服务:[/bold green] {self.server_url} (model: {loaded})"
                     )
                     return True
-        except Exception:
-            pass
+            except Exception as e:
+                logger.debug("Probe failed for %s: %s", url, e)
+                pass
         return False
 
     def load_model(self):
@@ -360,7 +398,8 @@ class AITraderChat:
             json=payload,
             headers=headers,
             stream=True,
-            timeout=600,
+            timeout=(30, None),
+            proxies={"http": None, "https": None},
         ) as resp:
             if resp.status_code == 401:
                 rprint(
@@ -385,12 +424,22 @@ class AITraderChat:
                     break
                 try:
                     chunk = json.loads(data)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    choice = chunk.get("choices", [{}])[0]
+                    delta = choice.get("delta", {})
                     content = delta.get("content", "")
                     if content:
                         text += content
+                        print(content, end="", flush=True)
+                    tool_calls = delta.get("tool_calls")
+                    if tool_calls:
+                        for tc in tool_calls:
+                            func = tc.get("function", {})
+                            name = func.get("name", "")
+                            args = func.get("arguments", "{}")
+                            text += f"\n调用工具: {name}({args})\n"
                 except json.JSONDecodeError:
                     continue
+        print()  # 换行
         return text
 
     def _generate_local(self) -> str:
@@ -418,6 +467,8 @@ class AITraderChat:
             prompt_cache_state=self.prompt_cache_state,
         ):
             text += chunk.text
+            print(chunk.text, end="", flush=True)
+        print()  # 换行
         return text
 
     def _generate(self) -> str:
@@ -741,13 +792,13 @@ def main():
     parser.add_argument(
         "--server-url",
         type=str,
-        default="http://localhost:8080",
-        help="已运行的 xmlx_vlm server 地址 (默认 http://localhost:8080)",
+        default=DEFAULT_SERVER_URL,
+        help=f"已运行的 xmlx_vlm server 地址 (默认 {DEFAULT_SERVER_URL})",
     )
     parser.add_argument(
         "--api-key",
         type=str,
-        default=None,
+        default=DEFAULT_API_KEY,
         help="server API Key",
     )
     parser.add_argument(
@@ -758,8 +809,8 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default=None,
-        help="本地加载的模型路径或 HuggingFace ID",
+        default=DEFAULT_MODEL,
+        help=f"本地加载的模型路径或 HuggingFace ID (默认 {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--temperature",

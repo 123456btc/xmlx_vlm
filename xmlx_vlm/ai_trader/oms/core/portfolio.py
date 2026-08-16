@@ -41,7 +41,22 @@ class Portfolio(PortfolioTracker):
         self._last_sync_ms = utc_now_ms()
 
     def get_position(self, symbol: str) -> Optional[Position]:
-        return self._positions.get(symbol)
+        """获取指定标的的持仓（支持标准对 'BTC/USDC' 或裸币种 'BTC'，大小写不敏感兼容）."""
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol, symbol_matches
+        if not symbol:
+            return None
+        try:
+            canonical = normalize_symbol(symbol)
+            if canonical in self._positions:
+                return self._positions[canonical]
+        except Exception:
+            pass
+
+        # 若未直接命中，遍历匹配标的
+        for pos_sym, pos in self._positions.items():
+            if symbol_matches(pos_sym, symbol):
+                return pos
+        return None
 
     def list_positions(self) -> List[Position]:
         return list(self._positions.values())
@@ -66,7 +81,7 @@ class Portfolio(PortfolioTracker):
     def update_mark_prices(self, prices: Dict[str, Decimal]) -> None:
         """用最新价格更新所有持仓未实现盈亏."""
         for symbol, price in prices.items():
-            pos = self._positions.get(symbol)
+            pos = self.get_position(symbol)
             if pos:
                 pos.update_mark_price(to_decimal(price))
 
@@ -85,7 +100,7 @@ class Portfolio(PortfolioTracker):
         return total
 
     def position_notional(self, symbol: str) -> Decimal:
-        pos = self._positions.get(symbol)
+        pos = self.get_position(symbol)
         return pos.notional() if pos else ZERO
 
     def total_realized_pnl(self) -> Decimal:

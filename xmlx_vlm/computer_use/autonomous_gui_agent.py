@@ -13,6 +13,7 @@ from .utils import BASE_DIR, draw_point, update_navigation_history
 
 from xmlx_vlm import load
 from xmlx_vlm import generate
+from xmlx_vlm.config import DEFAULT_MODEL
 
 min_pixels = 256 * 28 * 28
 max_pixels = 1512 * 982
@@ -24,14 +25,14 @@ SCREENSHOTS_DIR = BASE_DIR / "screenshots"
 AUDIO_DIR = BASE_DIR / "audio"
 
 # Use XMLX_VLM_COMPUTER_PLANNER_MODEL / XMLX_VLM_COMPUTER_GUI_MODEL to override.
-# Defaults follow XMLX_VLM_MODEL, falling back to diffusiongemma.
+# Defaults follow XMLX_VLM_MODEL, falling back to DEFAULT_MODEL (SSOT).
 PLANNER_MODEL = os.environ.get(
     "XMLX_VLM_COMPUTER_PLANNER_MODEL",
-    os.environ.get("XMLX_VLM_MODEL", "mlx-community/diffusiongemma-26B-A4B-it-4bit"),
+    os.environ.get("XMLX_VLM_MODEL", DEFAULT_MODEL),
 )
 GUI_MODEL = os.environ.get(
     "XMLX_VLM_COMPUTER_GUI_MODEL",
-    os.environ.get("XMLX_VLM_MODEL", "mlx-community/diffusiongemma-26B-A4B-it-4bit"),
+    os.environ.get("XMLX_VLM_MODEL", DEFAULT_MODEL),
 )
 
 _mouse = None

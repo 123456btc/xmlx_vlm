@@ -14,14 +14,16 @@ import logging
 import os
 from typing import Optional
 
-import mlx.core as mx
+try:
+    import mlx.core as mx
+except ImportError:
+    mx = None
 
-from .generate import (
-    DEFAULT_KV_GROUP_SIZE,
-    DEFAULT_KV_QUANT_SCHEME,
-    DEFAULT_PREFILL_STEP_SIZE,
-    DEFAULT_QUANTIZED_KV_START,
-)
+# KV cache & prefill generation defaults (SSOT)
+DEFAULT_KV_GROUP_SIZE = 64
+DEFAULT_KV_QUANT_SCHEME = "uniform"
+DEFAULT_PREFILL_STEP_SIZE = 2048
+DEFAULT_QUANTIZED_KV_START = 5000
 
 logger = logging.getLogger("xmlx_vlm.config")
 
@@ -46,11 +48,17 @@ def _maybe_clear_cache() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Server-level defaults
+# SSOT: Global Default Model & Server Configuration (Single Source of Truth)
 # ---------------------------------------------------------------------------
 
-DEFAULT_SERVER_HOST = "0.0.0.0"
-DEFAULT_SERVER_PORT = 5118
+DEFAULT_MODEL = os.getenv("XMLX_VLM_MODEL", "mlx-community/Qwen3.8-27B-4bit")
+DEFAULT_MODEL_PATH = DEFAULT_MODEL
+DEFAULT_SERVER_HOST = os.getenv("XMLX_VLM_HOST", "0.0.0.0")
+DEFAULT_SERVER_PORT = int(os.getenv("XMLX_VLM_PORT", "5118"))
+DEFAULT_CHAT_PORT = int(os.getenv("XMLX_VLM_CHAT_PORT", "5119"))
+DEFAULT_API_KEY = os.getenv("XMLX_VLM_API_KEY", "x123456")
+DEFAULT_SERVER_URL = f"http://localhost:{DEFAULT_SERVER_PORT}"
+
 DEFAULT_TOKEN_QUEUE_TIMEOUT = 600.0
 DEFAULT_FIRST_TOKEN_TIMEOUT = None  # No timeout for first token (prefill) by default
 
@@ -70,7 +78,7 @@ DEFAULT_MAX_QUEUE_DEPTH = 64
 # Maximum number of concurrent generating sequences in continuous batching.
 # Prevents unified memory OOM under multi-agent / burst workloads.
 # Override via XMLX_VLM_MAX_NUM_SEQS or --max-num-seqs.
-DEFAULT_MAX_NUM_SEQS = 16
+DEFAULT_MAX_NUM_SEQS = 4
 
 # When a client request omits thinking_budget/reasoning_effort, this server-wide
 # default caps thinking to avoid indefinitely-long reasoning that hangs agents

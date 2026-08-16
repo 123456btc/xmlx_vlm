@@ -21,14 +21,9 @@ HL_TIF_MAP = {
 
 
 def coin_from_symbol(symbol: str) -> str:
-    """从 BTC/USDC 提取 BTC."""
-    symbol = symbol.strip().upper()
-    if "/" in symbol:
-        return symbol.split("/")[0]
-    for quote in ("USDC", "USDT", "USD", "BTC", "ETH"):
-        if symbol.endswith(quote):
-            return symbol[: -len(quote)]
-    return symbol
+    """从 BTC/USDC 提取 BTC (使用统一的 extract_base_coin SSOT)."""
+    from xmlx_vlm.ai_trader.oms.utils.symbol import extract_base_coin
+    return extract_base_coin(symbol)
 
 
 def format_hl_price(px: float) -> float:
@@ -115,18 +110,27 @@ def hl_response_to_order(hl_response: Any, order: Order) -> Order:
         if statuses:
             first = statuses[0]
             if "resting" in first:
-                order.order_id = first["resting"].get("oid", order.order_id)
-                order.transition_to(OrderState.ACKNOWLEDGED)
+                order.order_id = str(first["resting"].get("oid", order.order_id or ""))
+                if order.state != OrderState.ACKNOWLEDGED:
+                    order.transition_to(OrderState.ACKNOWLEDGED)
             elif "filled" in first:
-                order.order_id = first["filled"].get("oid", order.order_id)
-                order.transition_to(OrderState.FILLED)
+                fill_data = first["filled"]
+                order.order_id = str(fill_data.get("oid", order.order_id or ""))
+                filled_sz = to_decimal(fill_data.get("totalSz", order.qty))
+                avg_px = to_decimal(fill_data.get("avgPx", order.price or ZERO))
+                if filled_sz > ZERO:
+                    order.filled_qty = filled_sz
+                    order.remaining_qty = max(ZERO, order.qty - filled_sz)
+                if avg_px > ZERO:
+                    order.avg_fill_price = avg_px
+                if order.state != OrderState.FILLED:
+                    order.transition_to(OrderState.FILLED)
             elif "error" in first:
-                order.transition_to(OrderState.REJECTED, reason=first["error"])
+                err_msg = str(first["error"])
+                order.transition_to(OrderState.REJECTED, reason=err_msg)
     else:
-        order.transition_to(
-            OrderState.REJECTED,
-            reason=hl_response.get("response", "unknown error"),
-        )
+        err_msg = str(hl_response.get("response", "unknown error"))
+        order.transition_to(OrderState.REJECTED, reason=err_msg)
     order.raw_response = hl_response
     return order
 

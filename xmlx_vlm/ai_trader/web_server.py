@@ -43,9 +43,6 @@ async def lifespan(app: FastAPI):
     global db, agent
     db = QuantSessionDB()
     
-    # Auto setup secure vault
-    _auto_init_and_unlock_vault()
-    
     # Initialize AITraderAgent
     logger.info("Initializing AITraderAgent Loop...")
     agent = AITraderAgent(
@@ -61,6 +58,9 @@ async def lifespan(app: FastAPI):
         risk_profile=app.state.risk_profile,
         dry_run=app.state.dry_run,
     )
+    
+    # Auto setup secure vault and bind active KMS key to agent OMS
+    _auto_init_and_unlock_vault()
     
     # Load agent (connects to inference server or loads model locally)
     await agent.load_agent()
@@ -1026,22 +1026,41 @@ async def watchlist_websocket(websocket: WebSocket):
 async def get_portfolio():
     """Query current positions, balance, and account metrics from the OMS."""
     try:
-        trading_tool = agent.registry.get_tool("trading")
-        oms = trading_tool.oms
+        oms = _get_oms()
         
         # Trigger portfolio/position sync with exchange (non-blocking thread execution)
         await oms.sync()
         summary = oms.portfolio_summary()
+        
+        # Enrich with live account info & KMS active wallet metadata
+        active_cred = vault.get_active_credential() if vault else None
+        summary["is_live"] = bool(oms.is_live or active_cred)
+        summary["exchange"] = oms.settings.exchange if (oms and oms.settings) else "hyperliquid"
+        summary["testnet"] = bool(getattr(oms.settings, "testnet", False)) if (oms and oms.settings) else False
+        if active_cred:
+            summary["wallet_address"] = active_cred.get("wallet_address")
+            summary["label"] = active_cred.get("label", "Hyperliquid")
+            summary["network"] = "Testnet" if active_cred.get("testnet") else "Mainnet"
+        else:
+            summary["wallet_address"] = getattr(oms.settings, "wallet_address", None) if (oms and oms.settings) else None
+            summary["label"] = "Hyperliquid" if (oms and oms.is_live) else "Local Simulator"
+            summary["network"] = "Mainnet" if (oms and oms.is_live) else "Paper"
+
         return summary
     except Exception as e:
         logger.error("Failed to fetch OMS portfolio: %s", e)
-        # Return empty mock format
+        active_cred = vault.get_active_credential() if vault else None
         return {
-            "account": {"available_margin": "0.0", "margin_utilization_pct": "0.0"},
+            "account": {"equity": "0.0", "available_margin": "0.0", "used_margin": "0.0", "margin_utilization_pct": "0.0"},
             "positions": [],
             "unrealized_pnl": "0.0",
             "realized_pnl": "0.0",
-            "margin_utilization_pct": "0"
+            "margin_utilization_pct": "0",
+            "is_live": bool(active_cred),
+            "exchange": "hyperliquid" if active_cred else "local",
+            "wallet_address": active_cred.get("wallet_address") if active_cred else None,
+            "label": active_cred.get("label", "Hyperliquid") if active_cred else "Disconnected",
+            "network": "Mainnet" if active_cred else "Offline"
         }
 
 
@@ -1069,10 +1088,14 @@ async def trigger_emergency_stop():
 @app.get("/api/config")
 def get_current_config():
     """Get current configuration of the platform."""
+    active_cred = vault.get_active_credential() if vault else None
     return {
         "model": agent.server_model if agent.use_server else agent.model_path,
-        "mode": "live" if agent.live else "local",
-        "exchange": "local" if agent.exchange == "paper" else agent.exchange,
+        "mode": "live" if (agent.live or active_cred) else "paper",
+        "exchange": "hyperliquid" if (agent.exchange == "hyperliquid" or active_cred) else "local",
+        "wallet_address": active_cred.get("wallet_address") if active_cred else None,
+        "label": active_cred.get("label", "Hyperliquid") if active_cred else "Paper Sim",
+        "network": "Mainnet" if (active_cred and not active_cred.get("testnet")) else ("Testnet" if active_cred else "Paper"),
         "risk_profile": agent.risk_profile,
         "server_connected": agent.use_server,
     }
@@ -1081,12 +1104,44 @@ def get_current_config():
 
 @app.get("/api/strategy/list")
 def get_strategy_list():
-    """Get list of unique strategy IDs (trader_id) from the decision store."""
+    """Get list of unique strategy IDs (trader_id) from the decision store with rich metadata."""
     from xmlx_vlm.ai_trader.store.sqlite_store import SQLiteDecisionStore
     store = SQLiteDecisionStore(LOGS_DIR / "ai_trader.db")
     try:
-        cursor = store._conn.execute("SELECT DISTINCT trader_id FROM decision_records")
-        return [row[0] for row in cursor.fetchall()]
+        cursor = store._conn.execute(
+            """
+            SELECT trader_id, COUNT(*) as count, MAX(timestamp_ms) as last_active_ms
+            FROM decision_records
+            GROUP BY trader_id
+            ORDER BY MAX(timestamp_ms) DESC
+            """
+        )
+        results = []
+        for row in cursor.fetchall():
+            trader_id = row[0]
+            count = row[1]
+            last_active_ms = row[2]
+            
+            is_live = "hyperliquid" in trader_id.lower() or "binance" in trader_id.lower() or ("paper" not in trader_id.lower() and "test" not in trader_id.lower())
+            if "hyperliquid" in trader_id.lower():
+                type_label = "【🟢 实盘 Hyperliquid】"
+            elif "paper" in trader_id.lower():
+                type_label = "【🟡 模拟盘 Paper】"
+            elif is_live:
+                type_label = "【🟢 实盘 Live】"
+            else:
+                type_label = "【策略】"
+            
+            label = f"{type_label} {trader_id} ({count}条记录)"
+            
+            results.append({
+                "id": trader_id,
+                "label": label,
+                "is_live": is_live,
+                "count": count,
+                "last_active_ms": last_active_ms
+            })
+        return results
     except Exception as e:
         logger.error("Failed to fetch strategy list: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1101,7 +1156,12 @@ def get_strategy_decisions(trader_id: Optional[str] = None, limit: int = 20, off
     store = SQLiteDecisionStore(LOGS_DIR / "ai_trader.db")
     try:
         if not trader_id:
-            trader_id = "trend_follow_btc_paper"
+            cursor = store._conn.execute("SELECT trader_id FROM decision_records ORDER BY timestamp_ms DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                trader_id = row[0]
+            else:
+                trader_id = "trend_follow_all_hyperliquid"
         records = store.list_decisions(trader_id=trader_id, limit=limit, offset=offset)
         return [r.to_dict() for r in records]
     except Exception as e:
@@ -1109,6 +1169,91 @@ def get_strategy_decisions(trader_id: Optional[str] = None, limit: int = 20, off
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         store.close()
+
+
+# ── Self-Evolving Factor Research Endpoints ──
+
+@app.post("/api/research/evolve")
+def evolve_factors(payload: Optional[Dict[str, Any]] = None):
+    """Trigger self-evolving alpha factor mining pipeline."""
+    from xmlx_vlm.ai_trader.tools.research import FactorMiningTool
+    tool = FactorMiningTool()
+    params = payload or {}
+    try:
+        report_md = tool.execute(
+            action="evolve_factors",
+            symbol=params.get("symbol", "BTC/USDT"),
+            timeframe=params.get("timeframe", "1h"),
+            generations=int(params.get("generations", 3)),
+            population_size=int(params.get("population_size", 30)),
+            target_mechanism=params.get("target_mechanism", "composite"),
+        )
+        top_raw = tool.execute(action="get_top_factors", top_n=5)
+        import json
+        try:
+            top_factors = json.loads(top_raw)
+        except Exception:
+            top_factors = []
+
+        return {
+            "status": "success",
+            "report_markdown": report_md,
+            "top_factors": top_factors,
+        }
+    except Exception as e:
+        logger.error("Failed to evolve factors: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/research/memory")
+def get_research_memory_summary():
+    """Get Factor Experience Memory summary and active factor pool."""
+    from xmlx_vlm.ai_trader.tools.research import FactorMiningTool
+    tool = FactorMiningTool()
+    try:
+        raw = tool.execute(action="get_memory_summary")
+        import json
+        return json.loads(raw)
+    except Exception as e:
+        logger.error("Failed to fetch research memory: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/research/top_factors")
+def get_top_alpha_factors(top_n: int = 10):
+    """Get top performing discovered alpha factors."""
+    from xmlx_vlm.ai_trader.tools.research import FactorMiningTool
+    tool = FactorMiningTool()
+    try:
+        raw = tool.execute(action="get_top_factors", top_n=top_n)
+        import json
+        return json.loads(raw)
+    except Exception as e:
+        logger.error("Failed to fetch top alpha factors: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/research/diagnose")
+def diagnose_alpha_factor(payload: Dict[str, Any]):
+    """Perform Co-STEER diagnostic analysis and refine a candidate factor formula."""
+    from xmlx_vlm.ai_trader.tools.research import FactorMiningTool
+    tool = FactorMiningTool()
+    formula = payload.get("formula", "")
+    if not formula:
+        raise HTTPException(status_code=400, detail="formula is required")
+    try:
+        raw = tool.execute(
+            action="diagnose_factor",
+            formula=formula,
+            rank_ic=float(payload.get("rank_ic", 0.03)),
+            ir=float(payload.get("ir", 0.20)),
+            t_stat=float(payload.get("t_stat", 1.8)),
+        )
+        import json
+        return json.loads(raw)
+    except Exception as e:
+        logger.error("Failed to diagnose factor: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _init_mock_decisions():
@@ -1245,7 +1390,7 @@ def serve_upload(filename: str):
         raise HTTPException(status_code=404, detail="Upload file not found")
     return FileResponse(file_path)
 
-# Serves Pillow-generated PNG charts from the /Users/hongjianjia/xmlx_vlm/xmlx_vlm/ai_trader/data directory
+# Serves Pillow-generated PNG charts from the DATA_DIR directory
 @app.get("/api/static/charts/{filename}")
 def serve_chart(filename: str):
     chart_path = DATA_DIR / filename
@@ -1265,10 +1410,19 @@ def serve_index():
         return {"status": "error", "message": "Static assets folder 'web/static' is missing. Please create index.html"}
     return FileResponse(index_file, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
+class NoCacheStaticFiles(StaticFiles):
+    """Custom static file server that disables browser caching to ensure latest JS/CSS loads."""
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
 # Mount remaining files (CSS, JS) statically
 try:
     if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+        app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 except Exception as e:
     logger.warning("Could not mount static directory: %s", e)
 

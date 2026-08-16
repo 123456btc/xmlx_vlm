@@ -14,6 +14,7 @@ from xmlx_vlm.ai_trader.tools.market import MarketDataTool
 from xmlx_vlm.ai_trader.tools.trading import TradingTool
 from xmlx_vlm.ai_trader.tools.web_search import WebSearchTool, WebExtractTool
 from xmlx_vlm.ai_trader.tools.code_sandbox import ExecuteCodeTool
+from xmlx_vlm.ai_trader.tools.research import FactorMiningTool
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class ToolRegistry:
                 oms=None,  # 懒加载
             )
         )
+        self.register(FactorMiningTool())
         if enable_ptc:
             self.register(ExecuteCodeTool())
         self.mcp_manager = None
@@ -191,7 +193,14 @@ class ToolRegistry:
             return f"错误：工具 {name} 的参数必须是对象"
 
         logger.info("Executing tool %s with args %s", name, arguments)
-        return tool.run(**arguments)
+        if hasattr(tool, "run"):
+            return tool.run(**arguments)
+        elif hasattr(tool, "execute"):
+            return tool.execute(**arguments)
+        elif callable(tool):
+            return tool(**arguments)
+        else:
+            return f"错误：工具 {name} 未实现可执行方法"
 
     def execute_tool_calls(self, tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """批量执行工具调用，返回结果列表."""

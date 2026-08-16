@@ -9,8 +9,9 @@
 ### 1. 安装依赖
 
 ```bash
-cd /Users/hongjianjia/xmlx_vlm
-.venv/bin/python -m pip install -r requirements.txt
+cd xmlx_vlm
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
 > `websockets` 已写入 `requirements.txt`，用于 Hyperliquid 实时行情流。

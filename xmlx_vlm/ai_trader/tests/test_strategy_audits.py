@@ -53,3 +53,18 @@ def test_strategy_decisions_endpoint(tmp_path, monkeypatch):
     assert len(data) == 8
     assert data[0]["trader_id"] == "trend_follow_btc"
     assert "cot_trace" in data[0]
+
+    # Test /api/strategy/list endpoint
+    list_resp = client.get("/api/strategy/list")
+    assert list_resp.status_code == 200
+    strat_list = list_resp.json()
+    assert len(strat_list) == 1
+    assert strat_list[0]["id"] == "trend_follow_btc"
+    assert strat_list[0]["count"] == 8
+
+    # Test default trader_id resolution
+    default_resp = client.get("/api/strategy/decisions")
+    assert default_resp.status_code == 200
+    default_data = default_resp.json()
+    assert len(default_data) == 8
+    assert default_data[0]["trader_id"] == "trend_follow_btc"

@@ -13,11 +13,13 @@ from xmlx_vlm.agent_core import (
     ToolCallGuardrails,
 )
 
+from xmlx_vlm.config import DEFAULT_MODEL, DEFAULT_SERVER_URL
+
 # ─── Config ──────────────────────────────────────────────────────────────────
 
-MLX_URL = os.environ.get("MLX_URL", "http://localhost:5118")
+MLX_URL = os.environ.get("MLX_URL", DEFAULT_SERVER_URL)
 CDP_URL = os.environ.get("CDP_URL", "http://127.0.0.1:9222")
-MODEL = os.environ.get("MLX_MODEL_NAME", "mlx-community/diffusiongemma-26B-A4B-it-4bit")
+MODEL = os.environ.get("MLX_MODEL_NAME", os.environ.get("XMLX_VLM_MODEL", DEFAULT_MODEL))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "15"))
 
 B, G, Y, R, D, BD, RS = "\033[94m", "\033[92m", "\033[93m", "\033[91m", "\033[2m", "\033[1m", "\033[0m"

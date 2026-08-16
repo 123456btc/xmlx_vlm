@@ -28,6 +28,9 @@ class Trade:
     raw: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        from xmlx_vlm.ai_trader.oms.utils.symbol import normalize_symbol
+        if self.symbol:
+            self.symbol = normalize_symbol(self.symbol)
         self.qty = to_decimal(self.qty)
         self.price = to_decimal(self.price)
         self.fee = to_decimal(self.fee)

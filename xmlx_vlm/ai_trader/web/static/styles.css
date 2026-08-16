@@ -714,14 +714,65 @@ body {
     border-bottom: none;
 }
 
+.account-meta-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 16px 0 16px;
+    gap: 8px;
+}
+
+.account-network-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.account-network-tag.live {
+    color: var(--color-success);
+}
+
+.account-network-tag.paper {
+    color: var(--color-warning);
+}
+
+.account-address-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: var(--color-accent);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.account-address-box:hover {
+    border-color: var(--color-accent);
+    background: rgba(0, 240, 255, 0.1);
+    transform: translateY(-1px);
+}
+
 .account-summary-card {
-    background-color: rgba(13, 38, 38, 0.4);
+    background-color: rgba(13, 38, 38, 0.45);
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-md);
-    margin: 12px 16px;
+    margin: 8px 16px 12px 16px;
     padding: 12px;
     display: flex;
     flex-direction: column;
+    gap: 10px;
+}
+
+.summary-top-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
 }
 
@@ -734,11 +785,16 @@ body {
     font-size: 10px;
     text-transform: uppercase;
     color: var(--color-text-secondary);
+    letter-spacing: 0.04em;
 }
 
 .summary-val {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
+}
+
+#portfolio-equity {
+    color: var(--color-success);
 }
 
 #portfolio-balance {
@@ -2192,4 +2248,334 @@ body {
     flex-grow: 1;
     max-height: none;
 }
+
+/* ==========================================================================
+   Modern Toast Notifications & Quant Modal System
+   ========================================================================== */
+
+/* --- Toast Container --- */
+.toast-container {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+    max-width: 440px;
+    width: calc(100% - 48px);
+}
+
+/* --- Toast Card --- */
+.quant-toast {
+    pointer-events: auto;
+    background: linear-gradient(135deg, rgba(13, 38, 38, 0.94) 0%, rgba(6, 18, 18, 0.97) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(20, 61, 61, 0.9);
+    border-radius: var(--border-radius-md);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 1px rgba(255, 255, 255, 0.12);
+    padding: 14px 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    position: relative;
+    overflow: hidden;
+    animation: toastSlideIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transition: transform 0.2s ease, opacity 0.2s ease, max-height 0.25s ease, margin 0.25s ease, padding 0.25s ease;
+}
+
+.quant-toast.toast-hiding {
+    animation: toastSlideOut 0.25s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes toastSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(100%) scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+@keyframes toastSlideOut {
+    from {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+        max-height: 160px;
+    }
+    to {
+        opacity: 0;
+        transform: translateX(110%) scale(0.9);
+        max-height: 0;
+        margin-top: -6px;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+}
+
+/* Variants */
+.quant-toast.toast-success {
+    border-left: 4px solid var(--color-success);
+    border-color: rgba(0, 230, 118, 0.3);
+}
+.quant-toast.toast-success .toast-icon {
+    color: var(--color-success);
+    background: rgba(0, 230, 118, 0.12);
+}
+
+.quant-toast.toast-error {
+    border-left: 4px solid var(--color-danger);
+    border-color: rgba(255, 23, 68, 0.35);
+}
+.quant-toast.toast-error .toast-icon {
+    color: var(--color-danger);
+    background: rgba(255, 23, 68, 0.12);
+}
+
+.quant-toast.toast-warning {
+    border-left: 4px solid var(--color-warning);
+    border-color: rgba(255, 234, 0, 0.35);
+}
+.quant-toast.toast-warning .toast-icon {
+    color: var(--color-warning);
+    background: rgba(255, 234, 0, 0.12);
+}
+
+.quant-toast.toast-info {
+    border-left: 4px solid var(--color-accent);
+    border-color: rgba(0, 229, 255, 0.3);
+}
+.quant-toast.toast-info .toast-icon {
+    color: var(--color-accent);
+    background: rgba(0, 229, 255, 0.12);
+}
+
+/* Toast Elements */
+.toast-icon {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    margin-top: 1px;
+}
+
+.toast-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.toast-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    line-height: 1.3;
+}
+
+.toast-message {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    line-height: 1.45;
+    word-break: break-word;
+    font-family: var(--font-sans);
+}
+
+.toast-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-text-tertiary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+.toast-close-btn:hover {
+    color: var(--color-text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Progress bar */
+.toast-progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.15);
+    transform-origin: left;
+    transition: transform linear;
+}
+.toast-success .toast-progress-bar {
+    background: var(--color-success);
+}
+.toast-error .toast-progress-bar {
+    background: var(--color-danger);
+}
+.toast-warning .toast-progress-bar {
+    background: var(--color-warning);
+}
+.toast-info .toast-progress-bar {
+    background: var(--color-accent);
+}
+
+/* --- Quant Confirmation / Prompt Modal --- */
+.quant-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: rgba(3, 10, 10, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.quant-modal-backdrop.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.quant-modal-card {
+    background: linear-gradient(145deg, rgba(13, 38, 38, 0.98) 0%, rgba(6, 16, 16, 0.99) 100%);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    border-radius: var(--border-radius-lg);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 30px rgba(0, 229, 255, 0.08);
+    width: 100%;
+    max-width: 480px;
+    overflow: hidden;
+    transform: scale(0.94) translateY(10px);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.quant-modal-backdrop.active .quant-modal-card {
+    transform: scale(1) translateY(0);
+}
+
+.quant-modal-card.modal-danger {
+    border-color: rgba(255, 23, 68, 0.35);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 30px rgba(255, 23, 68, 0.1);
+}
+
+.quant-modal-header {
+    padding: 20px 24px 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(20, 61, 61, 0.6);
+}
+
+.quant-modal-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    background: rgba(0, 229, 255, 0.12);
+    color: var(--color-accent);
+}
+.modal-danger .quant-modal-icon {
+    background: rgba(255, 23, 68, 0.15);
+    color: var(--color-danger);
+}
+
+.quant-modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    flex: 1;
+}
+
+.quant-modal-body {
+    padding: 20px 24px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
+}
+
+.quant-modal-input {
+    width: 100%;
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--color-bg-input);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-sm);
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.quant-modal-input:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
+}
+
+.quant-modal-footer {
+    padding: 14px 24px 20px 24px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(20, 61, 61, 0.4);
+}
+
+.quant-modal-btn {
+    padding: 9px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.quant-modal-btn-cancel {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--color-border);
+    color: var(--color-text-secondary);
+}
+.quant-modal-btn-cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--color-text-primary);
+}
+
+.quant-modal-btn-confirm {
+    background: linear-gradient(135deg, #00e5ff 0%, #00b0ff 100%);
+    color: #060e0e;
+    box-shadow: 0 4px 14px rgba(0, 229, 255, 0.3);
+}
+.quant-modal-btn-confirm:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+.quant-modal-btn-danger {
+    background: linear-gradient(135deg, #ff1744 0%, #d50000 100%);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(255, 23, 68, 0.35);
+}
+.quant-modal-btn-danger:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
 

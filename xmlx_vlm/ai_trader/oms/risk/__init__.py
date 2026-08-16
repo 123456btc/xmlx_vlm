@@ -3,5 +3,17 @@
 from xmlx_vlm.ai_trader.oms.risk.risk_result import RiskDecision
 from xmlx_vlm.ai_trader.oms.risk.risk_manager import RiskManager
 from xmlx_vlm.ai_trader.oms.risk.rules.base import RiskRule
+from xmlx_vlm.ai_trader.oms.risk.trailing_manager import (
+    TrailingStopManager,
+    TrailingPositionState,
+    TrailingStopSignal,
+)
 
-__all__ = ["RiskDecision", "RiskManager", "RiskRule"]
+__all__ = [
+    "RiskDecision",
+    "RiskManager",
+    "RiskRule",
+    "TrailingStopManager",
+    "TrailingPositionState",
+    "TrailingStopSignal",
+]

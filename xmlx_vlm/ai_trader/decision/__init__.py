@@ -9,6 +9,8 @@ from xmlx_vlm.ai_trader.decision.llm_client import (
     LocalServiceLLMClient,
 )
 from xmlx_vlm.ai_trader.decision.prompt_builder import PromptBuilder
+from xmlx_vlm.ai_trader.decision.sizing import PositionSizer, SizingRecommendation
+from xmlx_vlm.ai_trader.decision.post_mortem import PostMortemReport, TradePostMortemGenerator
 
 __all__ = [
     "Decision",
@@ -22,4 +24,8 @@ __all__ = [
     "LocalMLXLLMClient",
     "LocalServiceLLMClient",
     "PromptBuilder",
+    "PositionSizer",
+    "SizingRecommendation",
+    "PostMortemReport",
+    "TradePostMortemGenerator",
 ]

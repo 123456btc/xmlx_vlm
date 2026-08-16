@@ -20,6 +20,8 @@ import importlib
 import sys
 from typing import List, Optional
 
+from xmlx_vlm.config import DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_SERVER_PORT
+
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add args that are shared across many subcommands."""
@@ -112,11 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
                                help="Install into ~/.codex/config.toml (default)")
     mcp_install_p.add_argument("--project", action="store_true",
                                help="Install into ./.codex/config.toml")
-    mcp_install_p.add_argument("--base-url", type=str, default="http://127.0.0.1:5118/v1",
+    mcp_install_p.add_argument("--base-url", type=str, default=f"http://127.0.0.1:{DEFAULT_SERVER_PORT}/v1",
                                help="Server base URL")
-    mcp_install_p.add_argument("--api-key", type=str, default="x123456",
+    mcp_install_p.add_argument("--api-key", type=str, default=DEFAULT_API_KEY,
                                help="API key for the server")
-    mcp_install_p.add_argument("--model", type=str, default="mlx-community/diffusiongemma-26B-A4B-it-4bit",
+    mcp_install_p.add_argument("--model", type=str, default=DEFAULT_MODEL,
                                help="Default model name")
 
     # model subcommand

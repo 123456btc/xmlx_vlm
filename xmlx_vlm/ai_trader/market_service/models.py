@@ -101,7 +101,7 @@ class OHLCV:
 
 @dataclass
 class Indicators:
-    """某个时间周期上的技术指标快照."""
+    """某个时间周期上的技术指标与高阶策略因子快照."""
 
     timeframe: str
     ema20: float | None = None
@@ -114,6 +114,20 @@ class Indicators:
     poc: float | None = None
     vah: float | None = None
     val: float | None = None
+    # 6 大币圈实战高阶量化因子
+    bb_upper: float | None = None
+    bb_middle: float | None = None
+    bb_lower: float | None = None
+    bb_bandwidth: float | None = None
+    bb_percent_b: float | None = None
+    squeeze_score: float | None = None
+    is_squeezed: bool | None = None
+    candle_efficiency: float | None = None
+    pinbar_type: str | None = None
+    pinbar_wick_ratio: float | None = None
+    cvd_divergence: str | None = None
+    oi_regime: str | None = None
+    funding_zscore: float | None = None
 
 
 @dataclass
@@ -148,3 +162,13 @@ class MarketSummary:
     cvd_15m: float | None = None
     cvd_1h: float | None = None
     cvd_4h: float | None = None
+    # 6 大币圈实战高阶因子汇总
+    bb_bandwidth: float | None = None
+    squeeze_score: float | None = None
+    is_squeezed: bool = False
+    candle_efficiency: float | None = None
+    pinbar_type: str = "none"
+    cvd_divergence: str = "neutral"
+    oi_regime: str = "neutral"
+    funding_zscore: float | None = None
+

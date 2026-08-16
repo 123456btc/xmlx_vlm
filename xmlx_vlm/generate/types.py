@@ -2,11 +2,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from typing import Any, List, Optional, Tuple
-import mlx.core as mx
+try:
+    import mlx.core as mx
+except ImportError:
+    mx = None
 
+import os
 logger = logging.getLogger("xmlx_vlm.generate")
 
-DEFAULT_MODEL_PATH = "mlx-community/diffusiongemma-26B-A4B-it-4bit"
+DEFAULT_MODEL_PATH = os.getenv("XMLX_VLM_MODEL", "mlx-community/Qwen3.8-27B-4bit")
 DEFAULT_IMAGE = None
 DEFAULT_AUDIO = None
 DEFAULT_VIDEO = None
